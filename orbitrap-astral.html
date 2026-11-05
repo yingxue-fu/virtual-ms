@@ -200,27 +200,27 @@ const IRM={x0:-7,x1:-1};
  const hh=new THREE.Path();hh.moveTo(-.38,-.38);hh.lineTo(-.38,.38);hh.lineTo(.38,.38);hh.lineTo(.38,-.38);hh.lineTo(-.38,-.38);fs.holes.push(hh);
  const fg=new THREE.ExtrudeGeometry(fs,{depth:.32,bevelEnabled:false});fg.rotateY(Math.PI/2);
  for(let i=0;i<16;i++){const m=add(g,new THREE.Mesh(fg,i%2?mSteel:M(0xc9ced6)));m.position.set(IRM.x0+.05+i*(IRM.x1-IRM.x0-.35)/15,0,0);}}
-const OCT={x0:-.6,x1:-.6+350*MM};
-{const g=comp('oct','Transfer octapole (350 mm)',new THREE.Vector3((OCT.x0+OCT.x1)/2,.75,0));rodsX(g,OCT.x0,OCT.x1,.2,8,.025,mSteel);
- for(const x of[OCT.x0+5,OCT.x0+11]){const d=add(g,new THREE.Mesh(new THREE.CylinderGeometry(.55,.55,.12,32),mSteel));d.rotation.z=Math.PI/2;d.position.set(x,0,0);}}
-const IP={x0:17.3,xm:19.3,x1:20.8};
-{const g=comp('ip','Ion processor',new THREE.Vector3(19,.85,0));rodsX(g,IP.x0,IP.xm,.16,4,.06,mCopper,Math.PI/4);rodsX(g,IP.xm+.1,IP.x1,.16,4,.06,mSteel,Math.PI/4);
+const OCT={x0:-.6,x1:6.8};   // drawn shorter, as in Thermo's rendering (real part ≈ 350 mm)
+{const g=comp('oct','Transfer octapole',new THREE.Vector3((OCT.x0+OCT.x1)/2,.75,0));rodsX(g,OCT.x0,OCT.x1,.2,8,.025,mSteel);
+ for(const x of[OCT.x0+(OCT.x1-OCT.x0)*.33,OCT.x0+(OCT.x1-OCT.x0)*.66]){const d=add(g,new THREE.Mesh(new THREE.CylinderGeometry(.55,.55,.12,32),mSteel));d.rotation.z=Math.PI/2;d.position.set(x,0,0);}}
+const IP={x0:7.1,xm:9.6,x1:11.9};
+{const g=comp('ip','Ion processor',new THREE.Vector3((IP.x0+IP.x1)/2,.85,0));rodsX(g,IP.x0,IP.xm,.16,4,.06,mCopper,Math.PI/4);rodsX(g,IP.xm+.1,IP.x1,.16,4,.06,mSteel,Math.PI/4);
  const c=add(g,new THREE.Mesh(new THREE.CylinderGeometry(.45,.45,IP.x1-IP.x0+.2,32,1,true),M(0xb7bec8,{transparent:true,opacity:.4,side:THREE.DoubleSide,depthWrite:false})));c.rotation.z=Math.PI/2;c.position.set((IP.x0+IP.x1)/2,0,0);
  const pl=add(g,new THREE.Mesh(new THREE.TorusGeometry(.46,.05,8,32),mGold2));pl.rotation.y=Math.PI/2;pl.position.set(IP.xm+.05,0,0);}
-smallLbl('high P · HCD',new THREE.Vector3(18.3,-.75,0));smallLbl('low P · extract',new THREE.Vector3(20.1,-.75,0));
+smallLbl('high P · HCD',new THREE.Vector3((IP.x0+IP.xm)/2,-.75,0));smallLbl('low P · extract',new THREE.Vector3((IP.xm+IP.x1)/2,-.75,0));
 // injection optics: letterbox lenses + prism deflector. Layout follows the plan-view schematic in Stewart et al. 2023:
 // mirrors start well before the injection prism, detector + second prism sit at the proximal end beside the beam axis.
-const A={x0:23.4,Ld:335*MM,W:640*MM,N:24,tilt:6*MM};   // tilt drawn ×20 (real convergence ≈ 0.3 mm)
-const AENTRY=new THREE.Vector3(A.x0,0,0),DET=new THREE.Vector3(A.x0-3.2,0,-6.5);
-{const g=comp('inj','Injection optics',new THREE.Vector3(21.9,.8,0));
- for(const x of[21.2,22.0]){const l=add(g,new THREE.Mesh(new THREE.BoxGeometry(.12,.9,1.4),mSteel));l.position.set(x,0,0);const h=add(g,new THREE.Mesh(new THREE.BoxGeometry(.13,.12,.9),new THREE.MeshBasicMaterial({color:0x0a0e14})));h.position.set(x,0,0);}
+const A={x0:16.8,Ld:16.75,W:15.9,N:24,tilt:.3};   // proportions follow Thermo's rendering: gap ≈ 0.48 × mirror length   // tilt drawn ×20 (real convergence ≈ 0.3 mm)
+const AENTRY=new THREE.Vector3(A.x0,0,0),DET=new THREE.Vector3(A.x0-3.1,0,-4.3);
+{const g=comp('inj','Injection optics',new THREE.Vector3(A.x0-2.6,.9,0));
+ for(const x of[A.x0-4.1,A.x0-3.0]){const l=add(g,new THREE.Mesh(new THREE.BoxGeometry(.12,.9,1.4),mSteel));l.position.set(x,0,0);const h=add(g,new THREE.Mesh(new THREE.BoxGeometry(.13,.12,.9),new THREE.MeshBasicMaterial({color:0x0a0e14})));h.position.set(x,0,0);}
  const pr=new THREE.Shape();pr.moveTo(0,-.7);pr.lineTo(1.0,0);pr.lineTo(0,.7);pr.lineTo(0,-.7);const pg=new THREE.ExtrudeGeometry(pr,{depth:.06,bevelEnabled:false});pg.rotateX(Math.PI/2);
- for(const y of[.25,-.19]){const m=add(g,new THREE.Mesh(pg,mSteel));m.position.set(22.4,y,0);}
- for(const y of[.25,-.19]){const m=add(g,new THREE.Mesh(pg,mSteel));m.rotation.y=Math.PI/2;m.position.set(A.x0-2.8,y,3.3);}}   // second prism
-smallLbl('prism 2',new THREE.Vector3(A.x0-2.8,-.8,4.4));
+ for(const y of[.25,-.19]){const m=add(g,new THREE.Mesh(pg,mSteel));m.position.set(A.x0-1.05,y,0);}
+ for(const y of[.25,-.19]){const m=add(g,new THREE.Mesh(pg,mSteel));m.rotation.y=Math.PI/2;m.position.set(A.x0-2.8,y,3.2);}}   // second prism
+smallLbl('prism 2',new THREE.Vector3(A.x0-2.8,-.8,4.3));
 // mirror blocks: 5 electrodes each (pairs above/below a slit), ~480 mm long, faces ~450 mm apart (from schematic proportions)
 const mSlab=M(0xb7bec8,{roughness:.45}),mSlab2=M(0x8f98a4,{roughness:.45});
-const MIR={len:480*MM,x0:A.x0-5.5,face:11.25,th:.9,gap:.4,h:1.6,slit:.25};
+const MIR={len:24,x0:A.x0-5.5,face:5.75,th:.85,gap:.3,h:1.6,slit:.25};
 {const g=comp('mirrors','Asymmetric ion mirrors',new THREE.Vector3(A.x0+9,2.4,-MIR.face-3.5));
  for(const side of[1,-1]){const grp=new THREE.Group();grp.position.set(MIR.x0,0,side*MIR.face);if(side<0)grp.rotation.y=-Math.atan(A.tilt/MIR.len);g.add(grp);
   for(let i=0;i<5;i++)for(const sy of[1,-1]){const th=i===0?MIR.th*1.4:MIR.th;const zc=side*(i===0?th/2:MIR.th*1.4+MIR.gap+(i-1)*(MIR.th+MIR.gap)+MIR.th/2);
@@ -229,14 +229,14 @@ const MIR={len:480*MM,x0:A.x0-5.5,face:11.25,th:.9,gap:.4,h:1.6,slit:.25};
 // injection prism and widens slightly with drift, plus two side pieces attached to the mirror faces whose inner edges bulge
 // toward the centre about a third of the way along. Each piece is a pair of plates above and below the beam.
 function foilShape(pts){const sh=new THREE.Shape();sh.moveTo(pts[0][0],pts[0][1]);for(const q of pts.slice(1))sh.lineTo(q[0],q[1]);const g=new THREE.ShapeGeometry(sh);g.rotateX(Math.PI/2);return g;}
-const FL=16.6,ns=60,HF=11.25;
+const FL=18.4,ns=60,HF=MIR.face;
 const sideIn=(s,k)=>HF*k*(.80-.43*Math.exp(-(((s-.35)/.25)**2))-.17*s);
 const bell=[],up=[],lo=[];
 for(let i=0;i<=ns;i++){const s=i/ns;bell.push([FL*s,-HF*(.20+.10*s)]);}
 for(let i=ns;i>=0;i--){const s=i/ns;bell.push([FL*s,HF*(.20+.10*s)]);}
-for(let i=0;i<=ns;i++){const s=i/ns;up.push([-1.2+(FL+1.2)*s,-sideIn(s,1)]);}up.push([FL,-HF+.05],[-1.2,-HF+.05]);
-for(let i=0;i<=ns;i++){const s=i/ns;lo.push([-1.2+(FL+1.2)*s,sideIn(s,.95)]);}lo.push([FL,HF-.05],[-1.2,HF-.05]);
-{const g=comp('foil','Ion foil',new THREE.Vector3(A.x0+9,1.3,3));
+for(let i=0;i<=ns;i++){const s=i/ns;up.push([-1.9+(FL+.8)*s,-sideIn(s,1)]);}up.push([FL-1.1,-HF+.05],[-1.9,-HF+.05]);
+for(let i=0;i<=ns;i++){const s=i/ns;lo.push([-1.9+(FL+.8)*s,sideIn(s,.95)]);}lo.push([FL-1.1,HF-.05],[-1.9,HF-.05]);
+{const g=comp('foil','Ion foil',new THREE.Vector3(A.x0+9,1.3,2));
  const mC=new THREE.MeshStandardMaterial({color:0xd5dbe2,metalness:.6,roughness:.3,transparent:true,opacity:.42,side:THREE.DoubleSide,depthWrite:false});
  const mO=new THREE.MeshStandardMaterial({color:0xc4ccd6,metalness:.6,roughness:.35,transparent:true,opacity:.34,side:THREE.DoubleSide,depthWrite:false});
  for(const y of[.6,-.6]){for(const [pts,m] of[[bell,mC],[up,mO],[lo,mO]]){const f=add(g,new THREE.Mesh(foilShape(pts),m));f.position.set(A.x0,y,0);}}
@@ -379,10 +379,10 @@ const INFO={
  ctrap:['Bent trap (C-trap)','<p>Collects the MS1 packet, squeezes it into a short bunch and fires it into the Orbitrap, just as on an Exploris.</p>'],
  orbi:['Ultra-high-field Orbitrap (MS1)','<p>Note how small it is next to the Astral analyzer, just a few centimetres (size estimated). Measures the MS1 scan at high resolution (typically 240,000) and high dynamic range. A long transient takes time, so the Orbitrap keeps oscillating its one MS1 packet <b>while</b> the Astral measures many MS2 scans. In this animation that is 8. On the real instrument, Thermo describes about 100 Astral MS2 scans during one 240k MS1 scan.</p>'],
  irm:['Ion routing multipole (IRM)','<p>A gas-filled quadrupole ion guide (about 10⁻² mbar N₂) that traps and routes ions. It can also do HCD for Orbitrap MS2, but here it is the switching point: MS1 packets go back through the C-trap into the Orbitrap, and MS2 packets go forward toward the Astral side.</p>'],
- oct:['Transfer octapole','<p>A 350 mm-long octapole that carries MS2 packets from the IRM to the ion processor. It is one of the longest parts of the ion path, which is why the line in Thermo’s rendering looks so long.</p>'],
+ oct:['Transfer octapole','<p>A 350 mm-long octapole that carries MS2 packets from the IRM to the ion processor. It is drawn shorter here to match the proportions of Thermo’s rendering.</p>'],
  ip:['Ion processor','<p>A small linear quadrupole trap (inscribed radius r₀ = 2 mm) with two pressure regions. In the <b>high-pressure</b> section (about 10⁻² mbar), ions are fragmented by HCD and cooled. In the <b>low-pressure</b> section (2–4 × 10⁻³ mbar), the packet is compressed and pulsed out into the Astral analyzer.</p><p>The quad fills the next packet while this one fragments and the previous one is in flight. That pipelining is how the instrument reaches up to 200 MS2 scans per second.</p>'],
  inj:['Injection optics','<p>“Letterbox” lenses and an electrostatic prism shape the packet and launch it between the mirrors. The ions start at a shallow angle of about 2° to the reflection axis, so each pass only moves them a little way down the mirrors.</p>'],
- mirrors:['Asymmetric ion mirrors (Astral analyzer)','<p>Two long, gridless ion mirrors made of 5 electrodes each. Ions fly through the slit between the upper and lower plates. The effective distance between the mirrors is about <b>640 mm</b>, so every pass across the gap is long.</p><p>The mirrors converge by only about <b>0.3 mm</b> along their length (drawn 20× larger here). That tiny asymmetry slows the ions’ drift, stops it about <b>335 mm</b> from the injection point, and sends the ions back. In total ions make about <b>24 oscillations</b>, a track of roughly 30 m, and reach the detector after about 0.8 ms for m/z 524. That gives up to about 80,000 resolution at m/z 524.</p><p>Slow the animation down (speed 0.1–0.3) to follow individual ions. The red line is one ion’s full track.</p>'],
+ mirrors:['Asymmetric ion mirrors (Astral analyzer)','<p>Two long, gridless ion mirrors made of 5 electrodes each. Ions fly through the slit between the upper and lower plates. The published effective distance between the mirrors is about <b>640 mm</b>, so every pass across the gap is long. (The drawing follows the proportions of Thermo’s rendering, where the gap is about half the mirror length.)</p><p>The mirrors converge by only about <b>0.3 mm</b> along their length (drawn 20× larger here). That tiny asymmetry slows the ions’ drift, stops it about <b>335 mm</b> from the injection point, and sends the ions back. In total ions make about <b>24 oscillations</b>, a track of roughly 30 m, and reach the detector after about 0.8 ms for m/z 524. That gives up to about 80,000 resolution at m/z 524.</p><p>Slow the animation down (speed 0.1–0.3) to follow individual ions. The red line is one ion’s full track.</p>'],
  foil:['Ion foil','<p>A pair of shaped plates mounted <b>above and below</b> the ion path between the mirrors, biased at a small adjustable voltage (0 to −20 V). Converging mirrors would otherwise make each oscillation slightly shorter the further ions drift, which smears arrival times. The foil corrects this: ions spend a different fraction of each pass at the foil potential depending on how far they have drifted. That keeps the oscillation period constant and also focuses the packet back onto the detector.</p><p>The outline here follows Thermo’s 3D rendering and the plan-view schematic in Stewart et al. (2023). A central plate starts at the injection prism and widens slightly with drift distance. Two side pieces sit against the mirror faces, and their inner edges bulge toward the centre about a third of the way along. The proportions are read off published images, so they are approximate rather than engineering dimensions.</p>'],
  det:['High dynamic range detector','<p>At the injection end of the mirrors, beside the beam axis on the tilted-mirror side (where the schematic puts it). Returning ions are post-accelerated (about 10 kV) onto a conversion dynode. Its output goes to a scintillator and photomultiplier with two gain channels, which lets the detector see single ions and still handle intense peaks.</p>']};
 const info=document.getElementById('info');
@@ -399,8 +399,8 @@ function view(v){const a=camera.aspect,k=1/Math.min(a,1.3);let tgt,pos;
   if(v==="overview"){tgt=a<1?new THREE.Vector3(12,0,4):new THREE.Vector3(7,-1,0);pos=a<1?tgt.clone().add(new THREE.Vector3(-.8,.62,.55).normalize().multiplyScalar(66/Math.max(a,.5))):tgt.clone().add(new THREE.Vector3(-.3,.6,1).normalize().multiplyScalar(Math.max(55,80/Math.min(a,1.7))));}
   else if(v==='front'){tgt=new THREE.Vector3(-27,0,1);pos=new THREE.Vector3(-28,4,11*k);}
   else if(v==='ctrap'){tgt=new THREE.Vector3(CTX+.5,-1.2,0);pos=new THREE.Vector3(CTX+2.5,1.5,6*k);}
-  else if(v==='ip'){tgt=new THREE.Vector3(19.5,0,0);pos=new THREE.Vector3(18,2.5,6*k);}
-  else{tgt=new THREE.Vector3(A.x0+8,0,0);pos=a<1?new THREE.Vector3(A.x0-14,30,30*k*.8):new THREE.Vector3(A.x0+8,40,22);}
+  else if(v==='ip'){tgt=new THREE.Vector3(IP.x1,0,0);pos=new THREE.Vector3(IP.x1-1.5,2.8,6.5*k);}
+  else{tgt=new THREE.Vector3(A.x0+6.5,0,0);pos=a<1?new THREE.Vector3(A.x0-8,20,20*k*.8):new THREE.Vector3(A.x0+6.5,26,15);}
   camAnim={p0:camera.position.clone(),t0:controls.target.clone(),p1:pos,t1:tgt,s:performance.now()};}
 document.querySelectorAll('#views button').forEach(b=>b.onclick=()=>view(b.dataset.v));
 document.getElementById('speed').oninput=e=>speed=+e.target.value;
