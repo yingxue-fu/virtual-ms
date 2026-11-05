@@ -100,12 +100,19 @@ const CW=CLOUD.reduce((a,c)=>a+c.w,0);
 function pickPrec(){let r=Math.random()*CW;for(const c of CLOUD){r-=c.w;if(r<=0)return c;}return CLOUD[0];}
 
 /* ================= diaPASEF window scheme =================
-   16 TIMS scans x 2 windows of 25 Th covering m/z 400-1200.
-   In each scan the quad first sits on the high-m/z window (high 1/K0 elutes first in TIMS),
-   then jumps to the low-m/z window. 1/K0 limits follow the 2+/3+ diagonal, so singly charged ions are skipped. */
+   8 TIMS scans x 3 windows of 33.3 Th covering m/z 400-1200 (24 windows).
+   In each scan the quad visits the high-, then middle-, then low-m/z window as 1/K0 drops during the ramp.
+   1/K0 limits follow the 2+/3+ diagonal; neighbouring windows in a scan meet halfway between their natural limits,
+   and singly charged ions above the diagonal are skipped. */
+const NSCAN=8,NPER=3,WMZ=800/(NSCAN*NPER);
+const kTop=c=>0.30+0.00095*c+0.08, kBot=c=>0.22+0.00085*c-0.06;
 const SCANS=[];
-for(let i=0;i<16;i++){const w=[];for(const c0 of[812.5+25*i,412.5+25*i]){w.push({lo:c0-12.5,hi:c0+12.5,klo:0.22+0.00085*c0-0.06,khi:0.30+0.00095*c0+0.08});}SCANS.push(w);}
-const NFRAMES=17; // frame 0 = MS1, frames 1..16 = diaPASEF scans
+for(let i=0;i<NSCAN;i++){const cs=[];for(let j=NPER-1;j>=0;j--)cs.push(400+WMZ*(i+NSCAN*j)+WMZ/2);   // high → low m/z
+  const w=cs.map(c0=>({lo:c0-WMZ/2,hi:c0+WMZ/2,klo:kBot(c0),khi:kTop(c0)}));
+  for(let j=0;j<w.length-1;j++){const b=(w[j].klo+w[j+1].khi)/2;w[j].klo=b;w[j+1].khi=b;}
+  SCANS.push(w);}
+const NFRAMES=NSCAN+1; // frame 0 = MS1, frames 1..8 = diaPASEF scans
+const fmz=v=>v.toFixed(0);
 function windowFor(frame,k){if(frame===0)return null;for(const w of SCANS[frame-1])if(k>=w.klo&&k<=w.khi)return w;return undefined;}
 const ceFor=k=>20+(k-0.6)*39; // collision energy ramped with mobility (eV)
 
@@ -267,11 +274,11 @@ function quadNow(){const tau=simT-frameT0-1.0/3.2*0+((TIMS2.xb-QX0)<0?0:0);// wi
   const tq=tau-(QX0-TIMS2.xb)/3.2;const k=thrAt(Math.max(0,tq));return {k,w:frameIdx===0?null:windowFor(frameIdx,k),tq};}
 function updateStatus(){const tau=simT-frameT0,thr=thrAt(tau);rampBar.style.width=Math.min(100,100*tau/T_FRAME)+'%';
   const q=quadNow();
-  if(frameIdx===0){stT.textContent=`Frame 1/17 · MS1 (PASEF off)`;stS.textContent=tau<T_XFER?'TIMS 1 → TIMS 2 transfer; TIMS 1 keeps accumulating':`Eluting 1/K₀ ≈ ${thr.toFixed(2)} · quad open · low collision energy`;labels.quad.textContent='Quadrupole · open';labels.quad.classList.remove('live');}
-  else{const s=frameIdx;stT.textContent=`Frame ${s+1}/17 · diaPASEF scan ${s}`;
-    stS.textContent=tau<T_XFER?`TIMS 1 → TIMS 2 transfer · windows m/z ${SCANS[s-1][0].lo}–${SCANS[s-1][0].hi} & ${SCANS[s-1][1].lo}–${SCANS[s-1][1].hi}`:
-      (()=>{const wn=windowFor(frameIdx,thr);return `Eluting 1/K₀ ≈ ${thr.toFixed(2)} · quad ${wn?`on m/z ${wn.lo}–${wn.hi}`:'idle (no window here)'} · CE ${ceFor(Math.max(.6,thr)).toFixed(0)} eV`;})();
-    labels.quad.textContent=q.w&&q.tq>T_XFER?`Quadrupole · ${q.w.lo}–${q.w.hi}`:'Quadrupole';labels.quad.classList.toggle('live',!!(q.w&&q.tq>T_XFER));}}
+  if(frameIdx===0){stT.textContent=`Frame 1/${NFRAMES} · MS1 (PASEF off)`;stS.textContent=tau<T_XFER?'TIMS 1 → TIMS 2 transfer; TIMS 1 keeps accumulating':`Eluting 1/K₀ ≈ ${thr.toFixed(2)} · quad open · low collision energy`;labels.quad.textContent='Quadrupole · open';labels.quad.classList.remove('live');}
+  else{const s=frameIdx;stT.textContent=`Frame ${s+1}/${NFRAMES} · diaPASEF scan ${s}`;
+    stS.textContent=tau<T_XFER?`TIMS 1 → TIMS 2 transfer · windows m/z ${SCANS[s-1].map(w=>fmz(w.lo)+'–'+fmz(w.hi)).join(', ')}`:
+      (()=>{const wn=windowFor(frameIdx,thr);return `Eluting 1/K₀ ≈ ${thr.toFixed(2)} · quad ${wn?`on m/z ${fmz(wn.lo)}–${fmz(wn.hi)}`:'idle (no window here)'} · CE ${ceFor(Math.max(.6,thr)).toFixed(0)} eV`;})();
+    labels.quad.textContent=q.w&&q.tq>T_XFER?`Quadrupole · ${fmz(q.w.lo)}–${fmz(q.w.hi)}`:'Quadrupole';labels.quad.classList.toggle('live',!!(q.w&&q.tq>T_XFER));}}
 
 /* ================= panel ================= */
 const cv=document.getElementById('pc'),cx=cv.getContext('2d');let tab='scheme';
@@ -289,7 +296,7 @@ function drawPanel(){const dpr=Math.min(devicePixelRatio,2),W=cv.clientWidth,H=c
   cx.save();cx.translate(9,T+h/2+16);cx.rotate(-Math.PI/2);cx.fillText('1/K₀ (V·s/cm²)',0,0);cx.restore();
   const tau=simT-frameT0,thr=thrAt(tau);
   if(tab==='scheme'){
-    title.textContent=frameIdx===0?'diaPASEF window scheme · now: MS1 frame (all ions)':`diaPASEF scheme · 16 scans × 2 windows (25 Th) · now scan ${frameIdx}`;
+    title.textContent=frameIdx===0?'diaPASEF window scheme · now: MS1 frame (all ions)':`diaPASEF scheme · ${NSCAN} scans × ${NPER} windows (${WMZ.toFixed(1)} Th) · now scan ${frameIdx}`;
     for(const c of CLOUD){cx.fillStyle=c.z===1?'rgba(255,138,122,.45)':'rgba(140,190,230,.45)';cx.fillRect(X(c.mz)-1,Y(c.k)-1,2,2);}
     SCANS.forEach((sc,i)=>{for(const wd of sc){const cur=i===frameIdx-1;const act=cur&&tau>T_XFER&&thr>=wd.klo&&thr<=wd.khi;
       cx.fillStyle=act?'rgba(255,180,84,.45)':cur?'rgba(255,180,84,.18)':'rgba(92,200,255,.05)';cx.strokeStyle=cur?'#ffb454':'rgba(92,200,255,.35)';cx.lineWidth=cur?1.5:.7;
@@ -302,7 +309,7 @@ function drawPanel(){const dpr=Math.min(devicePixelRatio,2),W=cv.clientWidth,H=c
     for(const p of hits){cx.fillStyle='#'+p.col.getHexString();cx.beginPath();cx.arc(X(p.mz),Y(p.k),2.2,0,7);cx.fill();}
     if(shownFrame>0){cx.fillStyle='#dbe7f3';cx.fillText('Fragments keep their precursor’s 1/K₀ → horizontal rows',L+6,T+12);
       for(const wd of SCANS[shownFrame-1]){cx.strokeStyle='rgba(255,180,84,.6)';cx.setLineDash([3,3]);cx.strokeRect(L,Y(wd.khi),w,Y(wd.klo)-Y(wd.khi));cx.setLineDash([]);
-        cx.fillStyle='#ffb454';cx.fillText(`window ${wd.lo}–${wd.hi}`,L+w-80,Y(wd.khi)+11);}}
+        cx.fillStyle='#ffb454';cx.fillText(`window ${fmz(wd.lo)}–${fmz(wd.hi)}`,L+w-80,Y(wd.khi)+11);}}
   }}
 
 /* ================= info ================= */
@@ -311,7 +318,7 @@ const INFO={
  cap:['Glass capillary + deflection transfer','<p>Ions enter the vacuum through a glass capillary, then the deflection transfer bends them 90° into the TIMS funnel. Neutral molecules and droplets (grey) can’t follow the turn and are pumped away.</p>'],
  tims1:['TIMS 1: accumulation','<p>Gas streams through the tunnel toward the exit while an electric field gradient pushes back on the ions. Each ion stops where the push of the gas balances the field. That position depends on its mobility, so ions sort themselves by 1/K₀ (roughly size ÷ charge) while they wait.</p><p>The <b>dual</b> TIMS is the key trick. TIMS 1 keeps collecting ions while TIMS 2 analyzes the previous batch, so almost no ions are wasted (close to 100% duty cycle). At the start of each frame the whole batch moves from TIMS 1 to TIMS 2.</p>'],
  tims2:['TIMS 2: elution (the ramp)','<p>Over one ramp (about 100 ms on the real instrument) the field is lowered (orange line). Ions with low mobility (high 1/K₀: large, low charge) need the strongest field to hold them, so they leave first. Then come smaller, more compact ions. That is the reverse of a classic drift tube.</p><p>The result is a time axis that encodes 1/K₀. Everything downstream (quad, collision energy) is synchronized to it.</p>'],
- quad:['Quadrupole, synchronized to mobility','<p>This is the “PASEF” part. Because ion mobility and m/z are correlated (larger peptides tend to have higher m/z), the quad doesn’t need to sit on one window for the whole ramp. In each diaPASEF scan it holds a high-m/z window while high-1/K₀ ions elute, then jumps to a low-m/z window for the lower-1/K₀ ions. In this scheme that’s 2 windows per 100 ms ramp instead of 1.</p><p>The 1/K₀ ranges of the windows follow the diagonal of multiply charged peptides, so singly charged contaminants (the top band) are mostly skipped. Ions outside the active window spiral into the rods (red).</p>'],
+ quad:['Quadrupole, synchronized to mobility','<p>This is the “PASEF” part. Because ion mobility and m/z are correlated (larger peptides tend to have higher m/z), the quad doesn’t need to sit on one window for the whole ramp. In each diaPASEF scan it holds a high-m/z window while high-1/K₀ ions elute, then steps down to a middle and then a low-m/z window as smaller ions follow. In this scheme that’s 3 windows of 33 Th per 100 ms ramp, so 8 ramps plus one MS1 frame cover m/z 400–1200 in a cycle of about 0.9 s.</p><p>The 1/K₀ ranges of the windows follow the diagonal of multiply charged peptides, so singly charged contaminants (the top band) are mostly skipped. Ions outside the active window spiral into the rods (red).</p>'],
  cell:['Collision cell','<p>Precursors that pass the quad are fragmented by collisions with N₂. On a timsTOF the collision energy is <b>ramped with mobility</b>, here from about 59 eV at 1/K₀ 1.6 down to 20 eV at 0.6. Larger ions need more energy to fragment well.</p><p>In DIA every precursor in the window fragments together, so the spectrum is a mixture. The mobility dimension helps take it apart.</p>'],
  tof:['Orthogonal-acceleration TOF','<p>Ions drift into the <b>pusher</b>. Every few tens of microseconds (here every 0.3 s of animation) a voltage pulse kicks them upward. All ions get the same energy, so speed scales with 1/√(m/z): light ions arrive first.</p><p>The <b>reflectron</b> (ion mirror at the top) turns them around. Faster ions of the same m/z dig deeper into the mirror, which cancels small energy differences and sharpens peaks. Ions keep their sideways drift, so the path is a V that ends on the detector.</p><p>Thousands of pushes per ramp are stacked into one <b>frame</b>, which records m/z × 1/K₀ (see Detector frame).</p>']};
 const info=document.getElementById('info');
