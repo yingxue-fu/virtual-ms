@@ -10,7 +10,7 @@ Interactive 3D models of mass spectrometers, built to learn how ions move throug
 
 ## View
 
-Open the files directly, or enable GitHub Pages (Settings → Pages → deploy from `main`) and visit `https://<user>.github.io/virtual-ms/orbitrap.html`.
+Open [`index.html`](index.html) and pick an instrument from the selector at the top (or link straight to one with `#orbitrap`, `#timstof` or `#astral`). With GitHub Pages enabled (Settings → Pages → deploy from `main`), that is `https://yingxue-fu.github.io/virtual-ms/`. Each instrument page also works on its own.
 
 ## Caveats
 

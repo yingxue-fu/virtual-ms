@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Virtual MS – 3D mass spectrometer models</title>
+<style>
+  :root{--bg:#0a0e14;--panel:#111821;--line:#223040;--ink:#e6edf3;--mute:#8b9bb0;--acc:#5cc8ff}
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);font:13px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;overflow:hidden}
+  #app{display:flex;flex-direction:column;height:100vh}
+  @supports (height:100dvh){#app{height:100dvh}}
+  nav{display:flex;align-items:center;gap:10px;padding:7px 10px;background:#0d131b;border-bottom:1px solid var(--line);flex-wrap:wrap}
+  nav b{font-size:14px;letter-spacing:.2px;margin-right:4px}
+  .seg{display:inline-flex;border:1px solid var(--line);border-radius:9px;overflow:hidden}
+  .seg button{background:transparent;border:0;color:var(--mute);padding:6px 12px;font:inherit;font-size:13px;cursor:pointer}
+  .seg button+button{border-left:1px solid var(--line)}
+  .seg button.on{background:#1d2a38;color:var(--ink)}
+  .seg button:hover{color:var(--ink)}
+  #desc{color:var(--mute);font-size:12px;flex:1;min-width:180px}
+  @media (max-width:560px){#desc{display:none}}
+  iframe{flex:1;width:100%;border:0;display:block;background:var(--bg)}
+</style>
+</head>
+<body>
+<div id="app">
+  <nav>
+    <b>Virtual MS</b>
+    <div class="seg" id="sel">
+      <button data-k="orbitrap">Orbitrap</button>
+      <button data-k="timstof">timsTOF</button>
+      <button data-k="astral">Orbitrap Astral</button>
+    </div>
+    <span id="desc"></span>
+  </nav>
+  <iframe id="view" title="Instrument model"></iframe>
+</div>
+<script>
+const PAGES={
+  orbitrap:{src:'orbitrap.html',desc:'Q-Orbitrap: Mathieu-equation quadrupole, HCD, Orbitrap transient → spectrum'},
+  timstof:{src:'timstof.html',desc:'timsTOF: dual TIMS, diaPASEF windows, TOF frames'},
+  astral:{src:'orbitrap-astral.html',desc:'Orbitrap Astral: parallel MS1 + narrow-window DIA, Astral analyzer to scale'}
+};
+const view=document.getElementById('view'),desc=document.getElementById('desc');
+function show(k){if(!PAGES[k])k='orbitrap';
+  if(view.dataset.k!==k){view.dataset.k=k;view.src=PAGES[k].src;}
+  desc.textContent=PAGES[k].desc;
+  document.querySelectorAll('#sel button').forEach(b=>b.classList.toggle('on',b.dataset.k===k));
+  if(location.hash.slice(1)!==k)history.replaceState(null,'','#'+k);}
+document.querySelectorAll('#sel button').forEach(b=>b.onclick=()=>show(b.dataset.k));
+addEventListener('hashchange',()=>show(location.hash.slice(1)));
+show(location.hash.slice(1));
+</script>
+</body>
+</html>
