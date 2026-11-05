@@ -50,6 +50,7 @@
   <header>
     <div class="title">Virtual Orbitrap Astral<span>parallel MS1 + DIA MS2, in 3D</span></div>
     <div class="controls">
+      <label class="ctl">DIA window <select id="ww" class="btn"><option value="2">2 Th (300)</option><option value="4">4 Th (150)</option><option value="10">10 Th (60)</option><option value="20" selected>20 Th (30)</option></select></label>
       <label class="ctl">Speed <input id="speed" type="range" min="0.1" max="3" step="0.1" value="1"></label>
       <button class="btn" id="pause">Pause</button>
     </div>
@@ -88,19 +89,25 @@ const PREC=[];
 for(let i=0;i<1500;i++){const mz=380+600*Math.pow(Math.random(),1.25);const z=Math.random()<.7?2:3;
   const frags=[];const mx=Math.min(1400,mz*z-80);for(let j=0;j<8;j++)frags.push({mz:rnd(150,mx),I:Math.random()});
   PREC.push({mz,z,I:Math.exp(1.1*gauss()),frags,col:mzColor(mz)});}
-const NWIN=300,WLO=380,WW=2;   // nDIA-style: 300 windows of 2 Th from m/z 380 to 980
-const winLo=w=>WLO+WW*w;
-const BYWIN=Array.from({length:NWIN},()=>[]);for(const p of PREC){const w=Math.floor((p.mz-WLO)/WW);if(w>=0&&w<NWIN)BYWIN[w].push(p);}
+const WLO=380,WHI=980;   // DIA range; window width is selectable (nDIA uses 2 Th → 300 windows)
 const PW=PREC.reduce((a,p)=>a+p.I,0);
 function pickAny(){let r=Math.random()*PW;for(const p of PREC){r-=p.I;if(r<=0)return p;}return PREC[0];}
 
 /* ============ acquisition schedule (slots) ============
-   slot s: s%9===0 → MS1 (quad open, packet → C-trap → Orbitrap); otherwise MS2 window.
+   One cycle = 1 MS1 slot + one MS2 slot per window, stepping through the windows in order (low → high m/z).
    MS2 packet pipeline: slot s quad + IRM fill → s+1 ion processor (HCD) → s+2 Astral flight.
-   MS1 packet: slot s fill → Orbitrap transient during s+1 … s+9, overlapping 8 MS2 scans. */
-const D=3.0,PER=9;
-const isMS1=s=>s>=0&&s%PER===0;
-function winOf(s){if(s<0||isMS1(s))return null;const n=s-Math.floor(s/PER)-1;return (n*37)%NWIN;}
+   MS1 packet: Orbitrap transient runs in parallel with the next MS2 scans (up to 100 of them, ≈ a 240k transient at 200 Hz). */
+const D=3.0;
+function makeCfg(start,ww){const n=Math.round((WHI-WLO)/ww),wins=[];
+  for(let i=0;i<n;i++){const lo=WLO+ww*i;wins.push({lo,hi:lo+ww,i,n,ww,prec:PREC.filter(p=>p.mz>=lo&&p.mz<lo+ww)});}
+  return {start,ww,n,per:n+1,ot:Math.min(100,n),wins};}
+const CFGS=[makeCfg(0,20)];
+function cfgOf(s){let c=CFGS[0];for(const k of CFGS)if(s>=k.start)c=k;return c;}
+const isMS1=s=>{if(s<0)return false;const c=cfgOf(s);return (s-c.start)%c.per===0;};
+function winOf(s){if(s<0)return null;const c=cfgOf(s),r=(s-c.start)%c.per;return r===0?null:c.wins[r-1];}
+const OTE=new Map();
+function otEnd(s){if(OTE.has(s))return OTE.get(s);let e=s+1+cfgOf(s).ot-.1;for(let k=s+1;k<e;k++)if(isMS1(k)){e=Math.min(e,k+1.2);break;}OTE.set(s,e);return e;}  // transient ends early if the next MS1 packet arrives
+function lastMS1Slot(s){for(let k=s;k>=0&&k>s-200;k--)if(isMS1(k))return k;return -1;}
 let simT=-5,curSlot=-1,speed=1,paused=false;
 const slotOf=t=>Math.floor(t/D);
 
@@ -227,7 +234,7 @@ let parts=[];
 const V_FRONT=4.4,V_FLY=8;
 function spawn(){if(Math.random()<.1){parts.push({neutral:true,state:'path',u:0,v:rnd(3.2,4),pos:new THREE.Vector3(),dy:rnd(-1,1),dz:rnd(-1,1),ph:rnd(0,6.3),ph2:rnd(0,6.3),scale:1.6,col:GREY.clone()});return;}
   const bx=rnd(IRM.x0+.3,IRM.x1-.3);const tIrm=simT+PLEN/V_FRONT+(bx-QX0)/V_FLY;const s=slotOf(tIrm);const w=winOf(s);
-  let pr;if(w!==null&&BYWIN[w].length&&Math.random()<.35)pr=BYWIN[w][Math.floor(Math.random()*BYWIN[w].length)];else pr=pickAny();
+  let pr;if(w&&w.prec.length&&Math.random()<.35)pr=w.prec[Math.floor(Math.random()*w.prec.length)];else pr=pickAny();
   parts.push({pr,mz:pr.mz,slot:s,bx,state:'path',u:0,v:V_FRONT,pos:new THREE.Vector3(),dy:rnd(-1,1),dz:rnd(-1,1),ph:rnd(0,6.3),ph2:rnd(0,6.3),scale:1,col:pr.col.clone()});}
 function die(p){if(p.state==='dying'||p.dead)return;p.state='dying';p.dieT=simT;p.s0=p.scale;}
 function flash(pos,c=WHITE){parts.push({state:'flash',pos:pos.clone(),col:c.clone(),c0:c.clone(),scale:1,t0:simT});}
@@ -242,7 +249,6 @@ function onSlot(S){
     else if(p.state==='lp'&&p.slot===S-2){p.injT=simT+rnd(0,.05);}
   }
   const done=S-3;if(done>=0&&!isMS1(done))lastMS2={w:winOf(done),slot:done};
-  if(S-10>=0&&isMS1(S-10))lastMS1={slot:S-10};
 }
 let lastMS1=null,lastMS2=null;
 function fragment(p){flash(p.pos,new THREE.Color(.8,.8,.8));parts[parts.length-1].small=true;const ks=[...p.pr.frags].sort(()=>Math.random()-.5).slice(0,2+(Math.random()<.5?1:0));
@@ -256,7 +262,7 @@ function update(dt){
     case 'path':{p.u+=p.v*dt/PLEN;
       if(p.neutral&&p.u>=uBend){p.state='straight';break;}
       if(p.u>=1){p.u=1;if(p.slot<0){die(p);break;}const w=winOf(p.slot);
-        if(w!==null&&(p.mz<winLo(w)||p.mz>winLo(w)+WW)){p.state='rej';p.fx0=QX0;p.pos.x=QX0;p.fax=Math.random()<.5;break;}
+        if(w&&(p.mz<w.lo||p.mz>w.hi)){p.state='rej';p.fx0=QX0;p.pos.x=QX0;p.fax=Math.random()<.5;break;}
         p.state='fly';p.pos.set(QX0,0,0);break;}
       const u=Math.min(p.u,.998),f=fr(u),a=amp(u);p.pos.copy(path.getPointAt(u));
       if(u<uCapIn)p.pos.addScaledVector(f.up2,a*p.dy).addScaledVector(f.side,a*p.dz);else p.pos.addScaledVector(f.up2,a*p.dy*Math.cos(5*simT+p.ph)).addScaledVector(f.side,a*p.dz*Math.sin(6.5*simT+p.ph2));
@@ -273,13 +279,13 @@ function update(dt){
     case 'ct':{p.pos.set(p.base.x+.05*Math.sin(5*simT+p.ph),ctrapY(p.base.x)+.02*Math.sin(7*simT+p.ph2),.02*Math.cos(6*simT+p.ph));
       if(simT>=p.ejT){moveTo(p,new THREE.Vector3(O.x,O.y+1.25*OS,1.5*OS),.32*Math.sqrt(p.mz/400),'orbit',new THREE.Vector3(O.x,-1.1,.3));}break;}
     case 'orbit':{const o=p.orb,t=simT-o.t0,R=OS*(1+.25*Math.exp(-t/.4)),phi=Math.PI/2+o.wphi*t;p.pos.set(O.x+R*Math.cos(phi),O.y+R*Math.sin(phi),o.A*Math.cos(o.wz*t));
-      if(simT>=o.end)die(p);break;}
+      if(simT>=otEnd(p.slot)*D)die(p);break;}
     case 'astral':{const t=simT-p.t0,Tf=p.Tf,sN=Math.min(t/Tf,1);astralPos(sN,p.pos);p.pos.y+=.12*p.dy*Math.cos(9*t+p.ph)*Math.exp(-3*sN);
       if(t>=Tf){p.pos.copy(DET);flash(p.pos,p.col);p.dead=true;}break;}
     case 'move':{const m=p.mv;let k=(simT-m.t0)/m.dur;if(k>1)k=1;const e=k<.5?2*k*k:1-Math.pow(-2*k+2,2)/2;
       if(m.ctrl){const q=1-e;p.pos.set(0,0,0).addScaledVector(m.from,q*q).addScaledVector(m.ctrl,2*q*e).addScaledVector(m.to,e*e);}else p.pos.lerpVectors(m.from,m.to,e);
       if(k>=1){p.state=p.after;p.base=m.to.clone();
-        if(p.state==='orbit'){const wz=2*Math.PI*1.25*Math.sqrt(500/p.mz);p.orb={t0:simT,wz,wphi:.5*wz*(1+rnd(-.06,.06)),A:1.5*OS*(1+rnd(-.04,.04)),end:(p.slot+9)*D+.9*D};}
+        if(p.state==='orbit'){const wz=2*Math.PI*1.25*Math.sqrt(500/p.mz);p.orb={t0:simT,wz,wphi:.5*wz*(1+rnd(-.06,.06)),A:1.5*OS*(1+rnd(-.04,.04)),end:(p.slot+1+cfgOf(p.slot).ot-.1)*D};}
         if(p.state==='astral'){p.t0=simT;p.Tf=2.2*Math.sqrt(p.mz/1000);}
         if(p.state==='hp')p.fragAt=p.fragAt??null;}
       break;}
@@ -294,16 +300,17 @@ function writeInstances(){let n=0;for(const p of parts){const f=SMALL.has(p.stat
   ions.count=n;ions.instanceMatrix.needsUpdate=true;if(ions.instanceColor)ions.instanceColor.needsUpdate=true;}
 
 /* ============ status ============ */
-const wtxt=w=>`${winLo(w)}–${winLo(w)+WW}`;
+const wtxt=w=>`${w.lo}–${w.hi}`;
 const stT=document.getElementById('stT'),stRows=document.getElementById('stRows');
 function updateStatus(){const S=curSlot;if(S<0){stT.textContent='Ion beam starting…';stRows.innerHTML='';return;}
-  const n=S-Math.floor(S/PER);const busy=[S>=0,S>=1,S-1>=0&&!isMS1(S-1),S-2>=0&&!isMS1(S-2),S>=1&&Math.floor((S-1)/PER)*PER>=0].filter(Boolean).length;
-  stT.textContent=(isMS1(S)?'Filling the MS1 packet':`DIA MS2 scan ${n}`)+` · ${busy} packet${busy>1?'s':''} in play`;
+  const W=winOf(S),m=lastMS1Slot(S-1),k=S-m,ot=m>=0?cfgOf(m).ot:0,otOn=m>=0&&k>=1&&S<otEnd(m);
   const rows=[];
-  rows.push(['Quadrupole',isMS1(S)?'open (full range for MS1)':`isolating m/z ${wtxt(winOf(S))}`]);
+  rows.push(['Quadrupole',isMS1(S)?'open (full range for MS1)':`m/z ${wtxt(W)} (window ${W.i+1}/${W.n})`]);
   rows.push(['Ion processor',S-1>=0&&!isMS1(S-1)?`HCD of window ${wtxt(winOf(S-1))}`:'idle']);
   rows.push(['Astral',S-2>=0&&!isMS1(S-2)?`measuring window ${wtxt(winOf(S-2))}`:'idle']);
-  const m1=Math.floor((S-1)/PER)*PER;rows.push(['Orbitrap',S>=1&&S-m1>=1&&S-m1<=9&&m1>=0?`MS1 transient (${S-m1}/9)`:'waiting for MS1 packet']);
+  rows.push(['Orbitrap',otOn?`MS1 transient (${k}/${ot} MS2 scans)`:'idle until next MS1 packet']);
+  const busy=rows.filter(r=>!/idle/.test(r[1])).length;
+  stT.textContent=(isMS1(S)?'New cycle: filling the MS1 packet':`DIA MS2 · window ${W.i+1}/${W.n}`)+` · ${busy} packet${busy>1?'s':''} in play`;
   stRows.innerHTML=rows.map(r=>`<div class="r"><i>${r[0]}</i>${r[1]}</div>`).join('');}
 
 /* ============ panel ============ */
@@ -311,8 +318,8 @@ const cv=document.getElementById('pc'),cx=cv.getContext('2d');let tab='timeline'
 document.querySelectorAll('#tabs button').forEach(b=>b.onclick=()=>{tab=b.dataset.t;document.querySelectorAll('#tabs button').forEach(x=>x.classList.toggle('on',x===b));});
 const ROWS=['Quadrupole','IRM','Ion processor','Astral','Orbitrap'];
 function blocks(s){const out=[];if(s<0)return out;
-  if(isMS1(s)){out.push([0,s,s+1,'MS1','#ffb454']);out.push([1,s,s+1.25,'MS1','#ffb454']);out.push([4,s+1.3,s+9.9,'MS1 transient (240k)','#ffb454']);}
-  else{const w=winOf(s),c='#'+mzColor(winLo(w)).getHexString(),t=String(winLo(w));out.push([0,s,s+1,t,c]);out.push([1,s,s+1,t,c]);out.push([2,s+1,s+2,t,c]);out.push([3,s+2,s+3,t,c]);}
+  if(isMS1(s)){out.push([0,s,s+1,'MS1','#ffb454']);out.push([1,s,s+1.25,'MS1','#ffb454']);out.push([4,s+1.3,otEnd(s),'MS1 transient (240k)','#ffb454']);}
+  else{const w=winOf(s),c='#'+mzColor(w.lo).getHexString(),t=String(w.lo);out.push([0,s,s+1,t,c]);out.push([1,s,s+1,t,c]);out.push([2,s+1,s+2,t,c]);out.push([3,s+2,s+3,t,c]);}
   return out;}
 function drawPanel(){const dpr=Math.min(devicePixelRatio,2),W=cv.clientWidth,H=cv.clientHeight;if(!W||!H)return;
   if(cv.width!==Math.round(W*dpr)||cv.height!==Math.round(H*dpr)){cv.width=Math.round(W*dpr);cv.height=Math.round(H*dpr);}
@@ -322,7 +329,7 @@ function drawPanel(){const dpr=Math.min(devicePixelRatio,2),W=cv.clientWidth,H=c
     const L=78,T=6,w=W-L-8,rh=(H-T-22)/ROWS.length,now=simT/D,span=Math.max(7,Math.min(12,w/34)),t0=now-span*.62,X=t=>L+(t-t0)/span*w;
     ROWS.forEach((r,i)=>{cx.fillStyle='#8b9bb0';cx.fillText(r,6,T+rh*i+rh/2+3);cx.strokeStyle='#1b2733';cx.beginPath();cx.moveTo(L,T+rh*(i+1));cx.lineTo(L+w,T+rh*(i+1));cx.stroke();});
     cx.save();cx.beginPath();cx.rect(L,0,w,H);cx.clip();
-    for(let s=Math.floor(t0)-10;s<=t0+span+1;s++)for(const [r,a,b,t,c] of blocks(s)){const x0=X(a)+1,x1=X(b)-1;if(x1<L||x0>L+w)continue;const y=T+rh*r+3,hh=rh-6;
+    for(let s=Math.floor(t0)-105;s<=t0+span+1;s++)for(const [r,a,b,t,c] of blocks(s)){const x0=X(a)+1,x1=X(b)-1;if(x1<L||x0>L+w)continue;const y=T+rh*r+3,hh=rh-6;
       cx.globalAlpha=b<now?.4:a>now?.55:1;cx.fillStyle=c;cx.fillRect(x0,y,x1-x0,hh);cx.globalAlpha=1;cx.fillStyle='#0a0e14';if(x1-x0>24)cx.fillText(t,Math.max(x0,L)+3,y+hh/2+3);}
     cx.restore();cx.strokeStyle='#fff';cx.beginPath();cx.moveTo(X(now),T);cx.lineTo(X(now),H-18);cx.stroke();cx.fillStyle='#fff';cx.fillText('now',X(now)-9,H-6);
     cx.fillStyle='#8b9bb0';cx.fillText('MS2 blocks labelled by window start m/z',L+w-190,H-6);
@@ -333,9 +340,9 @@ function drawPanel(){const dpr=Math.min(devicePixelRatio,2),W=cv.clientWidth,H=c
       const mx=Math.max(1e-6,...peaks.map(p=>p.I));for(const p of peaks){const x=L+(p.mz-lo)/(hi-lo)*w;cx.strokeStyle=col||('#'+mzColor(p.mz).getHexString());cx.beginPath();cx.moveTo(x,T+h);cx.lineTo(x,T+h-p.I/mx*h);cx.stroke();}
       cx.fillStyle='#8b9bb0';cx.fillText(`${lo}`,L,T+h+11);cx.fillText(`${hi}`,L+w-22,T+h+11);cx.fillText(label,L+w/2-40,T+h+11);};
     if(lastMS1||curSlot>=1){draw(T1,h1,380,980,PREC.map(p=>({mz:p.mz,I:p.I})),'rgba(255,180,84,.85)','MS1 · m/z');
-      const S=curSlot;if(S>=0&&!isMS1(S)){const x=L+(winLo(winOf(S))-380)/600*w;cx.fillStyle='rgba(92,200,255,.35)';cx.fillRect(x-1,T1,Math.max(3,WW/600*w),h1);cx.fillStyle='#5cc8ff';cx.fillText('quad now',Math.min(x+4,L+w-50),T1+10);}}
-    if(lastMS2){const pk=[];for(const p of BYWIN[lastMS2.w])for(const f of p.frags)pk.push({mz:f.mz,I:p.I*f.I});
-      draw(T2,h1,100,1400,pk,null,'MS2 · m/z');cx.fillStyle='#dbe7f3';cx.fillText(`${BYWIN[lastMS2.w].length} precursors co-fragmented in this 2-Th window`,L+4,T2+10);}
+      const S=curSlot;if(S>=0&&!isMS1(S)){const Wn=winOf(S),x=L+(Wn.lo-380)/600*w;cx.fillStyle='rgba(92,200,255,.35)';cx.fillRect(x-1,T1,Math.max(3,Wn.ww/600*w),h1);cx.fillStyle='#5cc8ff';cx.fillText('quad now',Math.min(x+4,L+w-50),T1+10);}}
+    if(lastMS2){const pk=[];for(const p of lastMS2.w.prec)for(const f of p.frags)pk.push({mz:f.mz,I:p.I*f.I});
+      draw(T2,h1,100,1400,pk,null,'MS2 · m/z');cx.fillStyle='#dbe7f3';cx.fillText(`${lastMS2.w.prec.length} precursors co-fragmented in this ${lastMS2.w.ww}-Th window`,L+4,T2+10);}
   }}
 
 /* ============ info ============ */
@@ -344,7 +351,7 @@ const INFO={
  tube:['Ion transfer tube','<p>A heated tube that carries ions from atmosphere into the first vacuum stage.</p>'],
  funnel:['Ion funnel','<p>RF rings that collect the expanding gas jet and focus it into a tight ion beam.</p>'],
  guide:['Bent beam guide','<p>An RF guide with a bend. Ions follow it; neutrals and droplets (grey) fly straight and are pumped away.</p>'],
- quad:['Quadrupole','<p>For MS1 it is open. For DIA MS2 it isolates very narrow windows. Narrow-window DIA (nDIA) used 2-Th windows. Everything outside the window crashes into the rods (red), which is why the rest of the instrument has to waste almost nothing.</p><p>Here the quad steps through windows spread across m/z 380–980. The real method runs about 300 consecutive windows.</p>'],
+ quad:['Quadrupole','<p>For MS1 it is open. For DIA MS2 it isolates very narrow windows. Narrow-window DIA (nDIA) used 2-Th windows. Everything outside the window crashes into the rods (red), which is why the rest of the instrument has to waste almost nothing.</p><p>Each DIA cycle starts with one MS1 scan, then the quad steps through consecutive windows from low to high m/z (380 → 980) and the cycle repeats. Choose the window width at the top. 2 Th (300 windows) is the real nDIA method, but a full sweep then takes minutes at animation speed. 20 Th (30 windows) lets you watch a whole cycle.</p>'],
  ctrap:['Bent trap (C-trap)','<p>Collects the MS1 packet, squeezes it into a short bunch and fires it into the Orbitrap, just as on an Exploris.</p>'],
  orbi:['Ultra-high-field Orbitrap (MS1)','<p>Note how small it is next to the Astral analyzer, just a few centimetres (size estimated). Measures the MS1 scan at high resolution (typically 240,000) and high dynamic range. A long transient takes time, so the Orbitrap keeps oscillating its one MS1 packet <b>while</b> the Astral measures many MS2 scans. In this animation that is 8. On the real instrument, Thermo describes about 100 Astral MS2 scans during one 240k MS1 scan.</p>'],
  irm:['Ion routing multipole (IRM)','<p>A gas-filled quadrupole ion guide (about 10⁻² mbar N₂) that traps and routes ions. It can also do HCD for Orbitrap MS2, but here it is the switching point: MS1 packets go back through the C-trap into the Orbitrap, and MS2 packets go forward toward the Astral side.</p>'],
@@ -373,6 +380,7 @@ function view(v){const a=camera.aspect,k=1/Math.min(a,1.3);let tgt,pos;
   camAnim={p0:camera.position.clone(),t0:controls.target.clone(),p1:pos,t1:tgt,s:performance.now()};}
 document.querySelectorAll('#views button').forEach(b=>b.onclick=()=>view(b.dataset.v));
 document.getElementById('speed').oninput=e=>speed=+e.target.value;
+document.getElementById('ww').onchange=e=>{const st=Math.max(0,curSlot+3);CFGS.splice(0,CFGS.length,...CFGS.filter(c=>c.start<st));CFGS.push(makeCfg(st,+e.target.value));OTE.clear();};
 const pb=document.getElementById('pause');pb.onclick=()=>{paused=!paused;pb.textContent=paused?'Play':'Pause';};
 function resize(){const w=stage.clientWidth,h=stage.clientHeight;renderer.setSize(w,h);labelR.setSize(w,h);camera.aspect=w/h;camera.updateProjectionMatrix();}
 new ResizeObserver(resize).observe(stage);resize();
