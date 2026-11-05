@@ -1,0 +1,481 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Virtual Orbitrap – 3D ion path</title>
+<style>
+  :root{--bg:#0a0e14;--panel:#111821;--line:#223040;--ink:#e6edf3;--mute:#8b9bb0;--acc:#5cc8ff;--acc2:#ffb454;}
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);font:13px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;overflow:hidden}
+  #app{display:flex;flex-direction:column;height:100dvh;height:100vh}
+  @supports (height:100dvh){#app{height:100dvh}}
+  header{display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center;justify-content:space-between;padding:8px 12px;border-bottom:1px solid var(--line);background:var(--panel)}
+  .title{font-weight:650;font-size:15px;letter-spacing:.2px}
+  .title span{font-weight:400;color:var(--mute);font-size:12px;margin-left:6px}
+  .controls{display:flex;flex-wrap:wrap;gap:8px 10px;align-items:center}
+  .seg{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden}
+  .seg button{background:transparent;border:0;color:var(--mute);padding:5px 10px;font:inherit;cursor:pointer}
+  .seg button.on{background:#1d2a38;color:var(--ink)}
+  label.ctl{display:inline-flex;gap:6px;align-items:center;color:var(--mute)}
+  select,button.btn{background:#16202b;color:var(--ink);border:1px solid var(--line);border-radius:8px;padding:5px 8px;font:inherit;cursor:pointer}
+  input[type=range]{width:80px;accent-color:var(--acc)}
+  #stage{position:relative;flex:1;min-height:0;overflow:hidden}
+  #stage canvas{display:block}
+  .labels{position:absolute;inset:0;pointer-events:none}
+  .lbl{pointer-events:auto;cursor:pointer;font-size:11px;padding:2px 7px;border-radius:10px;background:rgba(17,24,33,.82);border:1px solid #2c3d50;color:#cfe3f5;white-space:nowrap;user-select:none}
+  .lbl:hover{border-color:var(--acc);color:#fff}
+  #status{position:absolute;left:10px;top:10px;max-width:min(calc(100% - 150px),420px);background:rgba(10,14,20,.78);border:1px solid var(--line);border-radius:10px;padding:7px 10px;pointer-events:none}
+  #status b{display:block;font-size:13px;color:var(--acc2)}
+  #status span{display:block;color:var(--mute);font-size:12px}
+  #agc{margin-top:5px;height:4px;background:#1b2632;border-radius:3px;overflow:hidden}
+  #agc i{display:block;height:100%;width:0;background:var(--acc)}
+  #views{position:absolute;right:10px;top:10px;display:flex;flex-direction:column;gap:5px}
+  #views button{background:rgba(17,24,33,.85);border:1px solid var(--line);color:var(--ink);border-radius:8px;padding:5px 9px;font:inherit;font-size:12px;cursor:pointer;text-align:left}
+  #views button:hover{border-color:var(--acc)}
+  #hint{position:absolute;left:10px;bottom:8px;color:var(--mute);font-size:11px;pointer-events:none}
+  #info{position:absolute;left:10px;right:10px;bottom:10px;max-width:520px;background:rgba(14,20,28,.96);border:1px solid #2f4357;border-radius:12px;padding:12px 14px 12px;box-shadow:0 8px 30px rgba(0,0,0,.5);max-height:62%;overflow:auto}
+  #info h3{margin:0 0 6px;font-size:14px;color:var(--acc)}
+  #info p{margin:0 0 7px;color:#c9d6e3}
+  #info .x{position:absolute;right:8px;top:6px;background:none;border:0;color:var(--mute);font-size:18px;cursor:pointer}
+  #specPanel{height:200px;border-top:1px solid var(--line);background:var(--panel);display:flex;flex-direction:column}
+  .specHead{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:5px 10px 0}
+  #specTitle{flex:1;min-width:0;color:var(--ink);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  #specTabs{flex:none}#specTabs button{font-size:11px;padding:3px 7px}
+  #specWrap{flex:1;min-height:0;position:relative}
+  #spec{position:absolute;inset:0;width:100%;height:100%}
+</style>
+<script type="importmap">
+{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"}}
+</script>
+</head>
+<body>
+<div id="app">
+  <header>
+    <div class="title">Virtual Orbitrap<span>Q-Orbitrap ion path, in 3D</span></div>
+    <div class="controls">
+      <div class="seg" id="mode">
+        <button data-m="auto" class="on">Auto (MS1→MS2)</button><button data-m="MS1">MS1</button><button data-m="MS2">MS2</button>
+      </div>
+      <label class="ctl">Resolution
+        <select id="res">
+          <option value="7500">7,500</option>
+          <option value="15000">15,000</option>
+          <option value="30000">30,000</option>
+          <option value="60000" selected>60,000</option>
+          <option value="120000">120,000</option>
+        </select>
+      </label>
+      <label class="ctl">Speed <input id="speed" type="range" min="0.25" max="2" step="0.25" value="1"></label>
+      <button class="btn" id="pause">Pause</button>
+    </div>
+  </header>
+  <main id="stage">
+    <div id="status"><b id="stTitle">Starting…</b><span id="stSub"></span><div id="agc"><i></i></div></div>
+    <div id="views">
+      <button data-v="overview">Overview</button>
+      <button data-v="source">Source</button>
+      <button data-v="quad">Quadrupole</button>
+      <button data-v="ctrap">C-trap / HCD</button>
+      <button data-v="orbi">Orbitrap</button>
+    </div>
+    <div id="hint">Tap a part to see what it does · drag to rotate · pinch/scroll to zoom · colour = m/z (violet low → red high)</div>
+    <div id="info" hidden><button class="x" id="infoX" aria-label="Close">×</button><h3 id="infoT"></h3><div id="infoB"></div></div>
+  </main>
+  <section id="specPanel">
+    <div class="specHead">
+      <span id="specTitle">Detector: waiting for the first scan</span>
+      <span id="specTabs" class="seg"><button data-t="stability" class="on">Quad</button><button data-t="transient">Transient</button><button data-t="spectrum">Spectrum</button></span>
+    </div>
+    <div id="specWrap"><canvas id="spec"></canvas></div>
+  </section>
+</div>
+
+<script type="module">
+import * as THREE from 'three';
+import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
+import {CSS2DRenderer, CSS2DObject} from 'three/addons/renderers/CSS2DRenderer.js';
+import {RoomEnvironment} from 'three/addons/environments/RoomEnvironment.js';
+
+/* ---------------- chemistry ---------------- */
+const RES={G:57.02146,A:71.03711,S:87.03203,P:97.05276,V:99.06841,T:101.04768,C:160.03065,L:113.08406,I:113.08406,N:114.04293,D:115.02694,Q:128.05858,K:128.09496,E:129.04259,M:131.04049,H:137.05891,F:147.06841,R:156.10111,Y:163.06333,W:186.07931};
+const TMT=229.162932, H2O=18.010565, PROTON=1.007276, C13=1.003355;
+const pepMass=s=>{let m=H2O+TMT;for(const c of s)m+=RES[c]+(c==='K'?TMT:0);return m;};
+const toMz=(M,z)=>(M+z*PROTON)/z;
+
+const species=[];
+function mzColor(mz){const t=Math.min(1,Math.max(0,(mz-100)/1200));return new THREE.Color().setHSL(0.76*(1-t),0.9,0.6);}
+function addSp(o){o.id=species.length;o.col=mzColor(o.mz);species.push(o);return o;}
+
+const PEPS=[['LVNELTEFAK',[[2,1.0],[3,0.25]]],['YLYEIAR',[[2,0.6]]],['HLVDEPQNLIK',[[2,0.45],[3,0.7]]],['AEFVEVTK',[[2,0.8]]],['DLGEEHFK',[[2,0.45],[3,0.2]]]];
+const MS1SP=[];
+for(const [seq,zs] of PEPS){const M=pepMass(seq);for(const [z,w] of zs)MS1SP.push(addSp({kind:'pep',seq,z,M,mz:toMz(M,z),w,label:`TMT-${seq} ${z}+`}));}
+MS1SP.push(addSp({kind:'bg',z:1,M:445.12003-PROTON,mz:445.12003,w:0.35,label:'polysiloxane (lock mass)'}));
+const TARGET=MS1SP[0];
+
+
+// fragments of the target (TMT on N-term and K)
+const FRAG=[];
+{const s=TARGET.seq;
+ let acc=TMT; for(let i=0;i<s.length-1;i++){acc+=RES[s[i]];if(i>=1){const w=[.5,.3,.25,.2,.15,.12,.1,.08][i-1]??.08;FRAG.push({sp:addSp({kind:'frag',z:1,M:acc,mz:acc+PROTON,label:'b'+(i+1)}),w});}}
+ acc=H2O+TMT; const yw=[.3,.35,.6,.5,.9,.7,.8,.5,.3];
+ for(let i=0;i<s.length-1;i++){const c=s[s.length-1-i];acc+=RES[c];FRAG.push({sp:addSp({kind:'frag',z:1,M:acc,mz:acc+PROTON,label:'y'+(i+1)}),w:yw[i]});}
+}
+const REP_NAMES=['126','127N','127C','128N','128C','129N','129C','130N','130C','131'];
+const REP_MZ=[126.127726,127.124761,127.131081,128.128116,128.134436,129.131471,129.137790,130.134825,130.141145,131.138180];
+const REP_W=[1.0,.8,.95,.6,.7,1.1,.5,.9,.75,.85];
+const REPS=REP_MZ.map((mz,i)=>({sp:addSp({kind:'rep',z:1,mz,M:mz-PROTON,label:REP_NAMES[i]}),w:REP_W[i]}));
+const FRAG_PLUS=[...FRAG,{sp:TARGET,w:0.5}];
+function pick(list){let t=0;for(const e of list)t+=e.w;let r=Math.random()*t;for(const e of list){r-=e.w;if(r<=0)return e.sp??e;}return list[list.length-1].sp??list[list.length-1];}
+const pickMS1=()=>pick(MS1SP.map(s=>({sp:s,w:s.w})));
+
+/* ---------------- scene ---------------- */
+const stage=document.getElementById('stage');
+const renderer=new THREE.WebGLRenderer({antialias:true});
+renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+renderer.toneMapping=THREE.ACESFilmicToneMapping;
+stage.prepend(renderer.domElement);
+const labelR=new CSS2DRenderer();labelR.domElement.className='labels';stage.appendChild(labelR.domElement);
+const scene=new THREE.Scene();scene.background=new THREE.Color(0x0a0e14);
+const pmrem=new THREE.PMREMGenerator(renderer);scene.environment=pmrem.fromScene(new RoomEnvironment(),0.04).texture;
+const camera=new THREE.PerspectiveCamera(45,1,0.05,300);
+const controls=new OrbitControls(camera,renderer.domElement);controls.enableDamping=true;
+scene.add(new THREE.HemisphereLight(0xbfd8ff,0x101418,0.6));
+const dl=new THREE.DirectionalLight(0xffffff,1.2);dl.position.set(5,10,8);scene.add(dl);
+const grid=new THREE.GridHelper(60,60,0x1a2633,0x121b25);grid.position.y=-7.6;scene.add(grid);
+
+const M=(c,o={})=>new THREE.MeshStandardMaterial({color:c,metalness:.85,roughness:.32,...o});
+const mGold=M(0xd8ab4f),mGold2=M(0xb98a35),mSteel=M(0xa9b4c2),mCopper=M(0xc27a52);
+const mGlass=c=>new THREE.MeshStandardMaterial({color:c,metalness:.6,roughness:.2,transparent:true,opacity:.18,side:THREE.DoubleSide,depthWrite:false});
+
+const comps={};const pickables=[];
+function comp(key,label,lpos){const g=new THREE.Group();g.userData.key=key;scene.add(g);comps[key]=g;
+  const d=document.createElement('div');d.className='lbl';d.textContent=label;d.addEventListener('click',e=>{e.stopPropagation();showInfo(key);});
+  const o=new CSS2DObject(d);o.position.copy(lpos);scene.add(o);return g;}
+function add(g,mesh){mesh.userData.key=g.userData.key;g.add(mesh);pickables.push(mesh);return mesh;}
+
+// main ion path: ESI tip -> C-trap entrance
+const path=new THREE.CatmullRomCurve3([
+  new THREE.Vector3(-16.2,0,1.5),new THREE.Vector3(-15,0,1.5),new THREE.Vector3(-14.2,0,1.5),new THREE.Vector3(-11.4,0,1.5),
+  new THREE.Vector3(-8.6,0,1.5),new THREE.Vector3(-8.0,0,1.5),new THREE.Vector3(-6.5,0,1.27),new THREE.Vector3(-5.0,0,0.55),
+  new THREE.Vector3(-3.6,0,0.06),new THREE.Vector3(-2.9,0,0),new THREE.Vector3(2.4,0,0),new THREE.Vector3(3.5,0,0)],false,'centripetal');
+const PATH_LEN=path.getLength();
+function uAtX(x){let b=0,bd=1e9;for(let i=0;i<=2000;i++){const u=i/2000,d=Math.abs(path.getPointAt(u).x-x);if(d<bd){bd=d;b=u;}}return b;}
+const uCapIn=uAtX(-14.2),uCapOut=uAtX(-11.4),uSOut=uAtX(-8.6),uFlat=uAtX(-8.0),uFlatEnd=uAtX(-2.9),uQuadIn=uAtX(-2.8);
+const uQuadOut=uAtX(2.4);
+const UP=new THREE.Vector3(0,1,0);
+function frame(u){u=Math.min(Math.max(u,0.0005),0.9995);const T=path.getTangentAt(u);const side=new THREE.Vector3().crossVectors(T,UP).normalize();const up2=new THREE.Vector3().crossVectors(side,T).normalize();return{T,side,up2};}
+
+// ESI
+{const g=comp('esi','ESI source',new THREE.Vector3(-17.2,0.75,1.5));
+ const n=add(g,new THREE.Mesh(new THREE.CylinderGeometry(.07,.07,2.6,16),mSteel));n.rotation.z=Math.PI/2;n.position.set(-17.85,0,1.5);
+ const tip=add(g,new THREE.Mesh(new THREE.ConeGeometry(.07,.35,16),mSteel));tip.rotation.z=-Math.PI/2;tip.position.set(-16.38,0,1.5);
+ const tc=add(g,new THREE.Mesh(new THREE.ConeGeometry(.05,.18,16),new THREE.MeshStandardMaterial({color:0x5cc8ff,transparent:true,opacity:.6})));tc.rotation.z=-Math.PI/2;tc.position.set(-16.15,0,1.5);
+ const hit=add(g,new THREE.Mesh(new THREE.SphereGeometry(1,8,8),new THREE.MeshBasicMaterial({visible:false})));hit.position.set(-15.4,0,1.5);}
+// capillary
+{const g=comp('cap','Transfer capillary',new THREE.Vector3(-12.8,0.65,1.5));
+ const c=add(g,new THREE.Mesh(new THREE.CylinderGeometry(.26,.26,2.8,28,1,true),M(0xb8a89a,{transparent:true,opacity:.5,side:THREE.DoubleSide,emissive:0x3a1400,depthWrite:false})));c.rotation.z=Math.PI/2;c.position.set(-12.8,0,1.5);}
+// S-lens
+{const g=comp('slens','S-lens',new THREE.Vector3(-9.9,1.25,1.5));
+ for(let i=0;i<10;i++){const s=i/9,x=-11.1+2.4*Math.pow(s,.8),r=.95-.6*s;const t=add(g,new THREE.Mesh(new THREE.TorusGeometry(r,.035,8,48),i%2?mSteel:mGold2));t.rotation.y=Math.PI/2;t.position.set(x,0,1.5);}}
+// bent flatapole
+{const g=comp('flat','Bent flatapole',new THREE.Vector3(-5.6,0.75,0.9));
+ for(let k=0;k<4;k++){const a=Math.PI/4+k*Math.PI/2,pts=[];for(let i=0;i<=40;i++){const u=uFlat+(uFlatEnd-uFlat)*i/40;const f=frame(u);pts.push(path.getPointAt(u).add(f.up2.clone().multiplyScalar(.32*Math.cos(a))).add(f.side.clone().multiplyScalar(.32*Math.sin(a))));}
+  add(g,new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts),60,.05,8),mCopper));}}
+// quadrupole
+{const g=comp('quad','Quadrupole',new THREE.Vector3(-0.2,1.0,0));
+ const geo=new THREE.CylinderGeometry(.2,.2,5.2,28);
+ [[0,.5,0,mGold],[0,-.5,0,mGold],[0,0,.5,mGold2],[0,0,-.5,mGold2]].forEach(([_,y,z,m])=>{const r=add(g,new THREE.Mesh(geo,m));r.rotation.z=Math.PI/2;r.position.set(-0.2,y,z);});}
+// C-trap
+const ctrapY=x=>-0.3*Math.pow((x-4.3)/0.7,2);
+{const g=comp('ctrap','C-trap',new THREE.Vector3(4.3,0.75,0));
+ [[.3,0],[-.3,0],[0,.3],[0,-.3]].forEach(([oy,oz])=>{const pts=[];for(let i=0;i<=20;i++){const x=3.6+1.4*i/20;pts.push(new THREE.Vector3(x,ctrapY(x)+oy,oz));}add(g,new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts),30,.07,10),mSteel));});}
+// HCD
+{const g=comp('hcd','HCD cell (N₂)',new THREE.Vector3(8,1.0,0));
+ for(let k=0;k<8;k++){const a=k*Math.PI/4;const r=add(g,new THREE.Mesh(new THREE.CylinderGeometry(.045,.045,4.8,10),mCopper));r.rotation.z=Math.PI/2;r.position.set(8,.38*Math.cos(a),.38*Math.sin(a));}
+ const h=add(g,new THREE.Mesh(new THREE.CylinderGeometry(.62,.62,4.9,32,1,true),mGlass(0x6fb7ff)));h.rotation.z=Math.PI/2;h.position.set(8,0,0);}
+// Orbitrap
+const O=new THREE.Vector3(4.3,-4.6,0);
+{const g=comp('orbi','Orbitrap',new THREE.Vector3(6.5,-4.6,0));g.position.copy(O);
+ const cp=[new THREE.Vector2(0,-2.45)];for(let i=0;i<=40;i++){const z=-2.4+4.8*i/40;cp.push(new THREE.Vector2(.16+.3*(1-(z/2.4)**2),z));}cp.push(new THREE.Vector2(0,2.45));
+ const cg=new THREE.LatheGeometry(cp,48);cg.rotateX(Math.PI/2);add(g,new THREE.Mesh(cg,mSteel));
+ const ro=z=>.95+.65*(1-(z/2.4)**2);
+ for(const sgn of[1,-1]){const op=[];for(let i=0;i<=30;i++){const z=sgn*(0.06+2.34*i/30);op.push(new THREE.Vector2(ro(z),z));}
+  const og=new THREE.LatheGeometry(sgn>0?op:op.reverse(),64);og.rotateX(Math.PI/2);add(g,new THREE.Mesh(og,mGlass(0xd9b26a)));
+  for(let i=0;i<=5;i++){const z=sgn*(0.06+2.34*i/5),r=ro(z),pts=[];for(let k=0;k<=64;k++){const a=k/64*Math.PI*2;pts.push(new THREE.Vector3(r*Math.cos(a),r*Math.sin(a),z));}
+   g.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts),new THREE.LineBasicMaterial({color:0x8a7444,transparent:true,opacity:.6})));}}}
+
+/* ---------------- ions ---------------- */
+const MAXI=3000;
+const ions=new THREE.InstancedMesh(new THREE.SphereGeometry(.055,10,8),new THREE.MeshBasicMaterial({color:0xffffff}),MAXI);
+ions.instanceMatrix.setUsage(THREE.DynamicDrawUsage);ions.setColorAt(0,new THREE.Color());ions.frustumCulled=false;ions.count=0;scene.add(ions);
+const WHITE=new THREE.Color(1,1,1),GREY=new THREE.Color(0x6b7280);
+let parts=[];let simT=0;
+const rnd=(a,b)=>a+Math.random()*(b-a);
+function newIon(sp,o={}){const p={sp,state:'path',u:0,v:rnd(4,4.8),pos:new THREE.Vector3(),dy:rnd(-1,1),dz:rnd(-1,1),ph:rnd(0,6.3),ph2:rnd(0,6.3),scale:1,col:new THREE.Color().copy(sp?sp.col:GREY),...o};parts.push(p);return p;}
+function die(p){if(p.state==='dying'||p.dead)return;p.state='dying';p.dieT=simT;p.s0=p.scale;}
+function moveTo(p,to,dur,after,ctrl=null,delay=0){p.mv={from:p.pos.clone(),to,ctrl,t0:simT+delay,dur};p.state='move';p.after=after;}
+const ctrapBase=()=>{const x=rnd(3.75,4.85);return new THREE.Vector3(x,ctrapY(x),0);};
+
+/* ---------------- scan control ---------------- */
+let mode='auto',resolution=60000,speed=1,paused=false;
+const TRANSIENT_MS={7500:16,15000:32,30000:64,60000:128,120000:256};
+const DETECT_VIS={7500:2.4,15000:3.0,30000:3.8,60000:4.8,120000:6.0};
+let scan=null,lastType='MS2';
+function newScan(){const type=mode==='auto'?(lastType==='MS1'?'MS2':'MS1'):mode;lastType=type;
+  scan={type,phase:'accum',t0:simT,trapped:0,agc:type==='MS1'?160:60,maxIT:type==='MS1'?5:8};}
+function setPhase(ph){scan.phase=ph;scan.t0=simT;}
+function startHCD(){setPhase('toHCD');for(const p of parts)if(p.state==='trapped')moveTo(p,new THREE.Vector3(rnd(6.2,9.8),rnd(-.12,.12),rnd(-.12,.12)),rnd(.8,1.1),'hcd',null,rnd(0,.2));}
+function startFrag(){setPhase('frag');for(const p of parts)if(p.state==='hcd'&&p.sp===TARGET)p.fragAt=simT+rnd(.05,.75);}
+function startBack(){setPhase('back');for(const p of parts)if(p.state==='hcd')moveTo(p,ctrapBase(),rnd(.8,1.1),'trapped',null,rnd(0,.2));}
+function startEject(){setPhase('eject');const E=new THREE.Vector3(O.x,O.y+1.25,1.5),C=new THREE.Vector3(O.x,-1.6,.6);
+  for(const p of parts)if(p.state==='trapped'){moveTo(p,E.clone(),.32*Math.sqrt(p.sp.mz/400),'orbit',C);}}
+function startDetect(){setPhase('detect');transient=[];specView='transient';setTabs();}
+function startHold(){setPhase('hold');buildSpectrum();specView='spectrum';setTabs();for(const p of parts)if(p.state==='orbit')die(p);}
+function phaseTick(){const el=simT-scan.t0;
+  switch(scan.phase){
+   case 'accum': if(scan.trapped>=scan.agc||el>scan.maxIT){scan.trapped>0?(scan.type==='MS2'?startHCD():startEject()):newScan();}break;
+   case 'toHCD': if(el>1.4)startFrag();break;
+   case 'frag': if(el>1.2)startBack();break;
+   case 'back': if(el>1.4)startEject();break;
+   case 'eject': if(el>.95)startDetect();break;
+   case 'detect': if(el>DETECT_VIS[resolution])startHold();break;
+   case 'hold': if(el>2.4)newScan();break;}}
+
+function fragment(p){
+  parts.push({state:'flash',pos:p.pos.clone(),col:new THREE.Color(1,1,1),scale:1,t0:simT});
+  const a=pick(FRAG_PLUS);
+  if(a===TARGET){p.fragAt=null;return;}
+  const kids=[a];kids.push(Math.random()<.65?pick(REPS):pick(FRAG));
+  for(const sp of kids){const k=newIon(sp,{state:'hcd'});k.pos.copy(p.pos);moveTo(k,p.pos.clone().add(new THREE.Vector3(rnd(-.35,.35),rnd(-.12,.12),rnd(-.12,.12))),.4,'hcd');}
+  p.dead=true;}
+
+/* ---------------- per-frame ion update ---------------- */
+const tmp=new THREE.Vector3();
+function amp(u){
+  if(u<uCapIn){const s=u/uCapIn;return .05+.42*Math.sin(Math.PI*s)*(1-.3*s);}
+  if(u<uCapOut)return .1;
+  if(u<uSOut){const s=(u-uCapOut)/(uSOut-uCapOut);return .08+.55*Math.sin(Math.PI*s)*(1-s);}
+  if(u<uQuadIn)return .1;return .03;}
+/* ---- quadrupole: Mathieu equation u'' + (a - 2q cos 2ξ) u = 0 (y-direction: a→-a, q→-q) ---- */
+const LAM=0.33547, QT=0.70582, Q_MS1=0.75, MS1_REF=445.12003;   // apex operating point for a 0.7 Th window
+const QX0=-2.8, QX1=2.4, QV=1.5, CYCLES=40, R0V=0.3;            // 40 RF cycles inside the rods (real ions see hundreds)
+const XI_RATE=CYCLES*Math.PI/((QX1-QX0)/QV);
+function quadAQ(mz){if(scan.type==='MS2'){const q=QT*TARGET.mz/mz;return [LAM*q,q];}return [0,Q_MS1*MS1_REF/mz];}
+function rk(s,i,a,q,x,h){const f=(x,u)=>-(a-2*q*Math.cos(2*x))*u;const u=s[i],v=s[i+1];
+  const k1u=v,k1v=f(x,u),k2u=v+h/2*k1v,k2v=f(x+h/2,u+h/2*k1u),k3u=v+h/2*k2v,k3v=f(x+h/2,u+h/2*k2u),k4u=v+h*k3v,k4v=f(x+h,u+h*k3u);
+  s[i]=u+h/6*(k1u+2*k2u+2*k3u+k4u);s[i+1]=v+h/6*(k1v+2*k2v+2*k3v+k4v);}
+const gauss=()=>Math.sqrt(-2*Math.log(1-Math.random()))*Math.cos(2*Math.PI*Math.random());
+function enterQuad(p){p.state='quad';p.qx=QX0;p.m=[.01*gauss(),.002*gauss(),.01*gauss(),.002*gauss()];p.xi=Math.random()*Math.PI;p.scale=1;p.col.copy(p.sp.col);}
+function floquetTrace(a,q,n){const h=Math.PI/n,A=[1,0],B=[0,1];let x=0;for(let i=0;i<n;i++){rk(A,0,a,q,x,h);rk(B,0,a,q,x,h);x+=h;}return A[0]+B[1];}
+const stableAQ=(a,q,n=60)=>Math.abs(floquetTrace(a,q,n))<2&&Math.abs(floquetTrace(-a,-q,n))<2;
+let spawnAcc=0;const RATE=95;
+function updateIons(dt){
+  spawnAcc+=dt*RATE;while(spawnAcc>=1){spawnAcc--;Math.random()<.12?newIon(null,{neutral:true,v:rnd(3.2,4)}):newIon(pickMS1());}
+  for(const p of parts){if(p.dead)continue;
+   switch(p.state){
+    case 'path':{p.u+=p.v*dt/PATH_LEN;
+      if(p.neutral&&p.u>=uFlat){p.state='straight';break;}
+      if(!p.neutral&&!p.qc&&p.u>=uQuadIn){p.qc=true;enterQuad(p);break;}
+      if(p.u>=1){p.u=1;if(scan.phase==='accum'&&scan.trapped<scan.agc&&!(scan.type==='MS2'&&p.sp!==TARGET)){p.state='trapped';p.base=ctrapBase();scan.trapped++;}else die(p);}
+      const u=Math.min(Math.max(p.u,0),0.9999),f=frame(u),a=amp(u);p.pos.copy(path.getPointAt(u));
+      if(u<uCapIn)p.pos.addScaledVector(f.up2,a*p.dy).addScaledVector(f.side,a*p.dz);
+      else{const w=5;p.pos.addScaledVector(f.up2,a*p.dy*Math.cos(w*simT+p.ph)).addScaledVector(f.side,a*p.dz*Math.sin(w*1.3*simT+p.ph2));}
+      if(!p.neutral){if(u<uCapOut){const k=u/uCapOut;p.scale=2.6-1.6*k;p.col.copy(WHITE).lerp(p.sp.col,k*k);}else{p.scale=1;p.col.copy(p.sp.col);}}else p.scale=1.6;
+      break;}
+    case 'quad':{const [a,q]=quadAQ(p.sp.mz),dxi=XI_RATE*dt,n=Math.max(1,Math.ceil(dxi/(Math.PI/40))),h=dxi/n;
+      for(let i=0;i<n;i++){rk(p.m,0,a,q,p.xi,h);rk(p.m,2,-a,-q,p.xi,h);p.xi+=h;}
+      p.qx+=QV*dt;const cl=v=>Math.max(-1,Math.min(1,v));p.pos.set(p.qx,R0V*cl(p.m[0]),R0V*cl(p.m[2]));
+      if(Math.abs(p.m[0])>1||Math.abs(p.m[2])>1){p.col.setRGB(1,.35,.3);die(p);break;}
+      if(p.qx>=QX1){p.state='path';p.u=uQuadOut;}break;}
+    case 'straight':p.pos.x+=p.v*dt;if(p.pos.x>-5.2)die(p);break;
+    case 'filtered':{p.fx+=2.6*dt;const A=.13*Math.exp(3*(p.fx-p.fx0));const o=A*Math.sin(14*simT+p.ph);p.pos.set(p.fx,p.fax?o:.05*Math.sin(9*simT),p.fax?.05*Math.cos(9*simT):o);if(A>.42)die(p);break;}
+    case 'trapped':case 'hcd':{const b=p.base||(p.base=p.pos.clone());
+      p.pos.set(b.x+.12*Math.sin(3*simT+p.ph),b.y+.03*Math.sin(7*simT+p.ph2),b.z+.03*Math.cos(6*simT+p.ph));
+      if(p.state==='hcd'&&p.fragAt&&simT>=p.fragAt)fragment(p);break;}
+    case 'move':{const m=p.mv;let k=(simT-m.t0)/m.dur;if(k<0)break;if(k>1)k=1;const e=k<.5?2*k*k:1-Math.pow(-2*k+2,2)/2;
+      if(m.ctrl){const q=1-e;p.pos.set(0,0,0).addScaledVector(m.from,q*q).addScaledVector(m.ctrl,2*q*e).addScaledVector(m.to,e*e);}else p.pos.lerpVectors(m.from,m.to,e);
+      if(k>=1){p.state=p.after;p.base=m.to.clone();if(p.state==='orbit'){const wz=2*Math.PI*1.25*Math.sqrt(500/p.sp.mz);p.orb={t0:simT,wz,wphi:.5*wz*(1+rnd(-.06,.06)),A:1.5*(1+rnd(-.04,.04))};}}
+      break;}
+    case 'orbit':{const o=p.orb,t=simT-o.t0,R=1+.25*Math.exp(-t/.4),phi=Math.PI/2+o.wphi*t;
+      p.pos.set(O.x+R*Math.cos(phi),O.y+R*Math.sin(phi),o.A*Math.cos(o.wz*t));break;}
+    case 'flash':{const k=(simT-p.t0)/.35;p.scale=1+6*k;p.col.setRGB(1,1,1).multiplyScalar(Math.max(0,1-k));if(k>=1)p.dead=true;break;}
+    case 'dying':{const k=(simT-p.dieT)/.4;p.scale=p.s0*(1-k);if(k>=1)p.dead=true;break;}
+   }}
+  parts=parts.filter(p=>!p.dead);
+  if(parts.length>MAXI)parts.splice(0,parts.length-MAXI);
+}
+const mtx=new THREE.Matrix4(),qI=new THREE.Quaternion(),sv=new THREE.Vector3();
+function writeInstances(){let n=0;for(const p of parts){sv.setScalar(Math.max(p.scale,0.0001));mtx.compose(p.pos,qI,sv);ions.setMatrixAt(n,mtx);ions.setColorAt(n,p.col);n++;}
+  ions.count=n;ions.instanceMatrix.needsUpdate=true;if(ions.instanceColor)ions.instanceColor.needsUpdate=true;}
+
+/* ---------------- detector: transient + spectrum ---------------- */
+let transient=[],lastSpec=null,specView='stability';
+function sampleTransient(){let I=0;for(const p of parts)if(p.state==='orbit'){const o=p.orb,t=simT-o.t0;I+=-o.A*o.wz*Math.sin(o.wz*t)*p.sp.z;}transient.push(I);}
+function poisson(l,k){let f=1;for(let i=2;i<=k;i++)f*=i;return Math.exp(-l)*Math.pow(l,k)/f;}
+function buildSpectrum(){const cnt=new Map();for(const p of parts)if(p.state==='orbit')cnt.set(p.sp,(cnt.get(p.sp)||0)+1);
+  const peaks=[];for(const [sp,c] of cnt){const I=c*sp.z;
+    if(sp.kind==='rep'){peaks.push({mz:sp.mz,I,label:sp.label,sp});continue;}
+    const lam=sp.M/1900;for(let k=0;k<5;k++){const w=poisson(lam,k);if(w<.03)continue;peaks.push({mz:sp.mz+k*C13/sp.z,I:I*w,label:k===0?(sp.kind==='frag'?sp.label:sp.mz.toFixed(2)+(sp.z>1?` (${sp.z}+)`:'')):'',sp});}}
+  const n=[...cnt.values()].reduce((a,b)=>a+b,0);
+  lastSpec={type:scan.type,peaks,res:resolution,n};}
+const fwhm=(mz,R)=>mz/(R*Math.sqrt(200/mz));
+
+const cv=document.getElementById('spec'),cx=cv.getContext('2d');
+function drawPanel(){const dpr=Math.min(devicePixelRatio,2),W=cv.clientWidth,H=cv.clientHeight;if(!W||!H)return;
+  if(cv.width!==Math.round(W*dpr)||cv.height!==Math.round(H*dpr)){cv.width=Math.round(W*dpr);cv.height=Math.round(H*dpr);}
+  cx.setTransform(dpr,0,0,dpr,0,0);cx.clearRect(0,0,W,H);cx.font='11px system-ui,sans-serif';
+  const title=document.getElementById('specTitle');
+  if(specView==='stability'){drawStability(W,H,title);return;}
+  if(specView==='transient'){
+    title.textContent=`Image current on the outer electrodes · ${TRANSIENT_MS[resolution]} ms transient (R ${(+resolution).toLocaleString()} @ m/z 200)`;
+    const L=8,T=8,w=W-16,h=H-26,mid=T+h/2;cx.strokeStyle='#223040';cx.beginPath();cx.moveTo(L,mid);cx.lineTo(L+w,mid);cx.stroke();
+    const N=Math.max(transient.length,1),mx=Math.max(1e-6,...transient.map(Math.abs));const total=DETECT_VIS[resolution]*60;
+    cx.strokeStyle='#5cc8ff';cx.lineWidth=1.2;cx.beginPath();transient.forEach((v,i)=>{const x=L+w*i/Math.max(total,N),y=mid-v/mx*h*.46;i?cx.lineTo(x,y):cx.moveTo(x,y);});cx.stroke();
+    cx.fillStyle='#8b9bb0';cx.fillText('time →   (beats = several m/z frequencies adding up; the FFT pulls them apart)',L,H-6);
+    return;}
+  if(!lastSpec){title.textContent='Detector: waiting for the first scan';cx.fillStyle='#8b9bb0';cx.fillText('The first spectrum appears after the ions reach the Orbitrap.',10,30);return;}
+  const S=lastSpec,R=S.res;
+  title.textContent=S.type==='MS1'?`MS1 survey · ${S.n} ions · R ${R.toLocaleString()} @ m/z 200`:`MS2 (HCD) of m/z ${TARGET.mz.toFixed(2)}, 2+ · ${S.n} ions · R ${R.toLocaleString()}`;
+  const split=W*.6,L=10,T=14,w=split-L-12,h=H-34;
+  const lo=S.type==='MS1'?350:100,hi=S.type==='MS1'?1100:1300,X=m=>L+(m-lo)/(hi-lo)*w;
+  const mx=Math.max(1e-6,...S.peaks.map(p=>p.I));
+  cx.strokeStyle='#2b3a4b';cx.beginPath();cx.moveTo(L,T+h);cx.lineTo(L+w,T+h);cx.stroke();
+  cx.fillStyle='#8b9bb0';for(let m=Math.ceil(lo/200)*200;m<=hi;m+=200){cx.fillText(m,X(m)-10,T+h+12);}
+  const sorted=[...S.peaks].sort((a,b)=>b.I-a.I);
+  for(const p of S.peaks){if(p.mz<lo||p.mz>hi)continue;cx.strokeStyle='#'+p.sp.col.getHexString();cx.lineWidth=1.4;cx.beginPath();cx.moveTo(X(p.mz),T+h);cx.lineTo(X(p.mz),T+h-p.I/mx*h);cx.stroke();}
+  const used=[];cx.fillStyle='#dbe7f3';
+  for(const p of sorted){if(!p.label||p.mz<lo||p.mz>hi)continue;const x=X(p.mz);if(used.some(u=>Math.abs(u-x)<34))continue;if(used.length>=6)break;used.push(x);
+    const t=p.sp.kind==='rep'?'TMT':p.label;cx.fillText(t,Math.min(x-12,L+w-30),Math.max(T+h-p.I/mx*h-3,T+8));}
+  // zoom inset
+  const zx=split+6,zw=W-zx-8;let zlo,zhi,zt,marks;
+  if(S.type==='MS1'){zlo=TARGET.mz-.35;zhi=TARGET.mz+2.0;zt='Zoom: precursor isotopes (0.5 apart → 2+)';marks=[];}
+  else{zlo=127.105;zhi=127.150;zt='Zoom: 127N vs 127C (6.3 mDa apart)';marks=[[REP_MZ[1],'127N'],[REP_MZ[2],'127C']];}
+  const zp=S.peaks.filter(p=>p.mz>zlo-.5&&p.mz<zhi+.5);const NN=260,prof=[];
+  for(let i=0;i<=NN;i++){const m=zlo+(zhi-zlo)*i/NN;let I=0;for(const p of zp){const f=fwhm(p.mz,R);I+=p.I*Math.exp(-4*Math.LN2*((m-p.mz)/f)**2);}prof.push(I);}
+  const pm=Math.max(1e-6,...prof),ZX=m=>zx+(m-zlo)/(zhi-zlo)*zw;
+  cx.strokeStyle='#2b3a4b';cx.strokeRect(zx,T,zw,h);
+  cx.beginPath();prof.forEach((v,i)=>{const x=zx+zw*i/NN,y=T+h-v/pm*(h-16);i?cx.lineTo(x,y):cx.moveTo(x,y);});
+  cx.strokeStyle=S.type==='MS1'?'#ffb454':'#c08bff';cx.lineWidth=1.5;cx.stroke();cx.lineTo(zx+zw,T+h);cx.lineTo(zx,T+h);cx.closePath();cx.fillStyle=S.type==='MS1'?'rgba(255,180,84,.15)':'rgba(192,139,255,.15)';cx.fill();
+  cx.fillStyle='#8b9bb0';cx.font='10px system-ui,sans-serif';
+  const words=zt.split(' ');let line='',ly=T+11;for(const wd of words){if(cx.measureText(line+wd).width>zw-8){cx.fillText(line,zx+4,ly);line='';ly+=11;}line+=wd+' ';}cx.fillText(line,zx+4,ly);
+  marks.forEach(([m,t],i)=>{cx.fillStyle='#dbe7f3';cx.textAlign=i?'left':'right';cx.fillText(t,ZX(m)+(i?3:-3),T+h+12);cx.textAlign='left';});
+  if(marks.length){const i1=Math.round((REP_MZ[1]-zlo)/(zhi-zlo)*NN),i2=Math.round((REP_MZ[2]-zlo)/(zhi-zlo)*NN);let vmin=Infinity;for(let i=i1;i<=i2;i++)vmin=Math.min(vmin,prof[i]);
+    const ok=vmin<.75*Math.min(prof[i1],prof[i2]);cx.fillStyle=ok?'#7ee0a1':'#ff8a7a';cx.fillText(ok?'resolved ✓':'merged: raise resolution',zx+4,ly+13);}
+  else{cx.fillStyle='#dbe7f3';cx.fillText(TARGET.mz.toFixed(2),ZX(TARGET.mz)-14,T+h+12);}
+}
+/* ---- stability diagram ---- */
+let stab=null;
+function buildStab(){
+  const mk=(nx,ny,q0,q1,a0,a1,n)=>{const c=document.createElement('canvas');c.width=nx;c.height=ny;const g=c.getContext('2d'),im=g.createImageData(nx,ny);
+    for(let j=0;j<ny;j++)for(let i=0;i<nx;i++){const q=q0+(q1-q0)*(i+.5)/nx,a=a1-(a1-a0)*(j+.5)/ny,k=4*(j*nx+i);
+      if(stableAQ(a,q,n)){im.data[k]=46;im.data[k+1]=110;im.data[k+2]=150;im.data[k+3]=200;}else im.data[k+3]=0;}
+    g.putImageData(im,0,0);return c;};
+  const Z={q0:.7035,q1:.7085,a0:.2350,a1:.2380};
+  // pass band along the scan line
+  let lo=null,hi=null;for(let i=0;i<=500;i++){const q=.7045+.003*i/500;if(stableAQ(LAM*q,q,200)){if(lo===null)lo=q;hi=q;}}
+  stab={wide:mk(200,90,0,1,0,.3,50),zoom:mk(110,80,Z.q0,Z.q1,Z.a0,Z.a1,160),Z,band:[QT*TARGET.mz/hi,QT*TARGET.mz/lo]};}
+function drawStability(W,H,title){if(!stab)buildStab();const ms2=scan.type==='MS2';
+  title.textContent=ms2?`Mathieu stability diagram · isolating m/z ${TARGET.mz.toFixed(2)}`:'Mathieu stability diagram · RF-only (transmit everything)';
+  const split=W*.6,L=26,T=10,w=split-L-8,h=H-30;
+  const X=q=>L+q*w,Y=a=>T+h-a/.3*h;
+  cx.imageSmoothingEnabled=true;cx.drawImage(stab.wide,L,T,w,h);
+  cx.strokeStyle='#2b3a4b';cx.strokeRect(L,T,w,h);cx.fillStyle='#8b9bb0';cx.font='10px system-ui,sans-serif';
+  for(const q of[0,.2,.4,.6,.8,1])cx.fillText(q,X(q)-(q?6:0),T+h+11);cx.fillText('q',L+w-6,T+h+21);
+  cx.save();cx.translate(9,T+h/2+4);cx.rotate(-Math.PI/2);cx.fillText('a',0,0);cx.restore();cx.fillText('.3',L-16,T+8);cx.fillText('0',L-10,T+h);
+  cx.fillStyle='#9fd3f0';cx.fillText('stable',X(.32),Y(.04));
+  // scan line
+  cx.strokeStyle='#ffb454';cx.setLineDash([4,3]);cx.beginPath();if(ms2){cx.moveTo(X(0),Y(0));cx.lineTo(X(.3/LAM),Y(.3));}else{cx.moveTo(X(0),Y(0)-1);cx.lineTo(X(1),Y(0)-1);}cx.stroke();cx.setLineDash([]);
+  if(!ms2){cx.strokeStyle='#ff8a7a';cx.beginPath();cx.moveTo(X(.908),T);cx.lineTo(X(.908),T+h);cx.stroke();cx.fillStyle='#ff8a7a';cx.fillText('cutoff',X(.908)-30,T+10);}
+  // species dots
+  let off=0;for(const sp of MS1SP){const [a,q]=quadAQ(sp.mz);cx.fillStyle='#'+sp.col.getHexString();
+    if(q>1){off++;cx.beginPath();const y=Math.min(T+h-3,Y(a));cx.moveTo(X(1)-1,y-4);cx.lineTo(X(1)+5,y);cx.lineTo(X(1)-1,y+4);cx.fill();continue;}
+    cx.beginPath();cx.arc(X(q),Math.min(Y(a),T+h-3),sp===TARGET?4.5:3.2,0,7);cx.fill();
+    if(sp===TARGET){cx.strokeStyle='#fff';cx.lineWidth=1;cx.stroke();cx.fillStyle='#fff';cx.fillText(TARGET.mz.toFixed(1),X(q)-14,Math.min(Y(a),T+h-3)-7);}}
+  // right side
+  const zx=split+6,zw=W-zx-8,zh=h;cx.fillStyle='#8b9bb0';
+  const wrap=(txt,x,y,mw)=>{let line='';for(const wd of txt.split(' ')){if(cx.measureText(line+wd).width>mw){cx.fillText(line,x,y);line='';y+=12;}line+=wd+' ';}cx.fillText(line,x,y);return y;};
+  if(!ms2){cx.fillStyle='#dbe7f3';let y=wrap('RF only (U = 0): every ion sits on the a = 0 axis at q ∝ 1/(m/z).',zx,T+12,zw);
+    cx.fillStyle='#8b9bb0';y=wrap(`Everything left of q = 0.908 is stable, so all peptides pass. Ions lighter than m/z ~${Math.round(Q_MS1*MS1_REF/0.908)} would be lost.`,zx,y+16,zw);
+    wrap('Switch to MS2 to watch isolation.',zx,y+16,zw);return;}
+  const Z=stab.Z,ZX=q=>zx+(q-Z.q0)/(Z.q1-Z.q0)*zw,ZY=a=>T+zh-(a-Z.a0)/(Z.a1-Z.a0)*zh;
+  cx.imageSmoothingEnabled=false;cx.drawImage(stab.zoom,zx,T,zw,zh);cx.strokeStyle='#2b3a4b';cx.strokeRect(zx,T,zw,zh);
+  cx.save();cx.beginPath();cx.rect(zx,T,zw,zh);cx.clip();cx.strokeStyle='#ffb454';cx.setLineDash([4,3]);cx.beginPath();cx.moveTo(ZX(Z.a0/LAM),ZY(Z.a0));cx.lineTo(ZX(Z.a1/LAM),ZY(Z.a1));cx.stroke();cx.setLineDash([]);cx.restore();
+  [[0,'M'],[1,'M+1'],[2,'M+2']].forEach(([k,t])=>{const mz=TARGET.mz+k*C13/2,q=QT*TARGET.mz/mz,a=LAM*q;cx.fillStyle=k?'#ff8a7a':'#7ee0a1';
+    cx.beginPath();cx.arc(ZX(q),ZY(a),3.5,0,7);cx.fill();cx.fillText(t,ZX(q)+5,ZY(a)+4);});
+  cx.fillStyle='#8b9bb0';cx.fillText('zoom: apex',zx+4,T+11);
+  cx.fillStyle='#dbe7f3';cx.fillText(`pass band ${stab.band[0].toFixed(2)}–${stab.band[1].toFixed(2)}`,zx,T+zh+11);
+  cx.fillStyle='#8b9bb0';cx.fillText(`(${(stab.band[1]-stab.band[0]).toFixed(2)} Th wide)`,zx,T+zh+22);}
+function setTabs(){document.querySelectorAll('#specTabs button').forEach(b=>b.classList.toggle('on',b.dataset.t===specView));}
+document.querySelectorAll('#specTabs button').forEach(b=>b.onclick=()=>{specView=b.dataset.t;setTabs();});
+
+/* ---------------- status ---------------- */
+const stT=document.getElementById('stTitle'),stS=document.getElementById('stSub'),agcBar=document.querySelector('#agc i');
+function updateStatus(){const s=scan,tag=s.type==='MS1'?'MS1':'MS2';let t='',sub='';
+  switch(s.phase){
+   case 'accum':t=s.type==='MS1'?`${tag}: filling the C-trap`:`${tag}: isolating the precursor`;
+     sub=s.type==='MS1'?`Quad RF-only (a = 0): passes m/z above ~${Math.round(Q_MS1*MS1_REF/0.908)} · AGC ${s.trapped}/${s.agc}`:`Quad at the stability apex for m/z ${TARGET.mz.toFixed(2)} (a ${(LAM*QT).toFixed(3)}, q ${QT.toFixed(3)}) · AGC ${s.trapped}/${s.agc}`;break;
+   case 'toHCD':t=`${tag}: into the HCD cell`;sub='Ions are accelerated into nitrogen gas';break;
+   case 'frag':t=`${tag}: fragmenting`;sub='Collisions break peptide bonds → b/y ions + TMT reporter ions';break;
+   case 'back':t=`${tag}: fragments back to the C-trap`;sub='Cooled and squeezed into a tight packet';break;
+   case 'eject':t=`${tag}: injecting into the Orbitrap`;sub='One short pulse; light ions arrive first';break;
+   case 'detect':t=`${tag}: Orbitrap detection`;sub=`Axial frequency ∝ 1/√(m/z) · ${TRANSIENT_MS[resolution]} ms transient`;break;
+   case 'hold':t=`${tag}: spectrum ready`;sub='FFT of the transient → frequencies → m/z';break;}
+  stT.textContent=t;stS.textContent=sub;agcBar.style.width=(s.phase==='accum'?100*s.trapped/s.agc:100)+'%';}
+
+/* ---------------- info ---------------- */
+const INFO={
+ esi:['Electrospray ionization (ESI)','<p>A few kV on the emitter pulls the LC eluent into a Taylor cone. The cone sprays fine charged droplets (white, shrinking here). As solvent evaporates, the droplets split until bare gas-phase ions are left, such as protonated peptides [M+zH]<sup>z+</sup>.</p><p>Tryptic peptides usually come off as 2+ or 3+, which is why one peptide can show up at two m/z values in MS1.</p>'],
+ cap:['Ion transfer capillary','<p>A heated metal tube (roughly 275–320 °C) that carries ions from atmospheric pressure into the first vacuum stage. The heat finishes desolvation.</p>'],
+ slens:['S-lens (stacked-ring ion guide)','<p>Rings carrying RF voltage, with alternating phase on neighbouring rings. The gas jet leaving the capillary expands, and the S-lens focuses the ions into a narrow beam at a few mbar while the gas is pumped away.</p>'],
+ flat:['Bent flatapole','<p>An RF ion guide with a curve in it. Ions follow the RF field around the bend. Neutral molecules and leftover droplets (grey) can’t be steered, so they fly straight and get pumped away. That cuts chemical noise and keeps the optics downstream clean.</p>'],
+ quad:['Quadrupole mass filter','<p>Four rods, with opposite rods wired together, carrying RF plus DC. At a given RF/DC setting, only one narrow m/z window has stable trajectories (the Mathieu stability region). Every other ion oscillates with growing amplitude and crashes into a rod.</p><p>The ion motion here is <b>integrated live from the Mathieu equation</b>, u″ + (a − 2q cos 2ξ)u = 0, with a = 8zeU/(mr₀²Ω²) and q = 4zeV/(mr₀²Ω²). Every ion has its own (q, a) because both scale with 1/(m/z). Ions whose point falls inside the stable region pass. All others grow exponentially and hit a rod (red flash).</p><p><b>MS1:</b> RF only (a = 0), so everything above the low-mass cutoff passes. <b>MS2:</b> U/V is set so that the scan line just clips the apex of the stability region, leaving a 0.7 Th window around m/z 811.48. The target only just stays stable, so its trajectory still swings widely and some copies are lost too. That loss is the real transmission cost of a narrow isolation window. See the <b>Quad stability</b> tab below.</p><p>Simplification: ions spend 40 RF cycles in the rods here (real ions see hundreds), and fringe fields are ignored.</p>'],
+ ctrap:['C-trap','<p>A curved RF-only trap filled with nitrogen bath gas. It collects ions until the <b>AGC target</b> is reached (or the maximum injection time runs out), cools them, then squeezes them into a short packet and fires it sideways into the Orbitrap. The curvature focuses the packet onto the Orbitrap entrance.</p><p>AGC matters: too few ions gives poor statistics, too many causes space-charge effects that shift mass accuracy.</p>'],
+ hcd:['HCD collision cell','<p>A multipole filled with N₂. Ions are accelerated in at a set collision energy (TMT methods often use about 30–36% NCE). Collisions heat the ions until the backbone breaks, producing <b>b</b> (N-terminal) and <b>y</b> (C-terminal) fragments.</p><p>The TMT tag also breaks at its linker and releases the low-mass <b>reporter ions</b> (126–131 for 10-plex). Their ratios carry the quantification across your channels.</p>'],
+ orbi:['Orbitrap mass analyzer','<p>A spindle-shaped central electrode inside a barrel-shaped outer electrode split at the middle. Ions enter off-centre, then orbit the spindle while swinging back and forth along its axis.</p><p>The axial frequency is ω = √(k / (m/z)). It doesn’t depend on the ion’s energy, which is why the measurement is so accurate. Light ions (violet) oscillate faster than heavy ones (red). Each m/z bunches into its own ring.</p><p>The two outer halves pick up an <b>image current</b> (the transient). A Fourier transform turns frequencies into m/z. A longer transient gives narrower peaks: resolution scales with transient length and falls as 1/√(m/z). Switch between 15k and 60k and compare the 127N/127C zoom in an MS2 scan.</p>']};
+const info=document.getElementById('info');
+function showInfo(k){document.getElementById('infoT').textContent=INFO[k][0];document.getElementById('infoB').innerHTML=INFO[k][1];info.hidden=false;}
+document.getElementById('infoX').onclick=()=>info.hidden=true;
+
+/* ---------------- picking ---------------- */
+const ray=new THREE.Raycaster(),ndc=new THREE.Vector2();let down=null;
+renderer.domElement.addEventListener('pointerdown',e=>down={x:e.clientX,y:e.clientY});
+renderer.domElement.addEventListener('pointerup',e=>{if(!down||Math.hypot(e.clientX-down.x,e.clientY-down.y)>6)return;const r=renderer.domElement.getBoundingClientRect();
+  ndc.set((e.clientX-r.left)/r.width*2-1,-(e.clientY-r.top)/r.height*2+1);ray.setFromCamera(ndc,camera);const h=ray.intersectObjects(pickables,false)[0];if(h)showInfo(h.object.userData.key);});
+
+/* ---------------- camera views ---------------- */
+let camAnim=null;
+function view(v){const a=camera.aspect;let tgt,pos;
+  if(v==='overview'){tgt=new THREE.Vector3(-3.5,-2,0.5);if(a<1){tgt=new THREE.Vector3(-3,-2.6,0.5);pos=tgt.clone().add(new THREE.Vector3(-.75,.6,.75).normalize().multiplyScalar(30/Math.max(a,.5)));}
+    else{const d=Math.min(70,Math.max(22,36/Math.min(a,1.7)));pos=tgt.clone().add(new THREE.Vector3(.12,.5,1).normalize().multiplyScalar(d));}}
+  else if(v==='source'){tgt=new THREE.Vector3(-12.5,0,1.5);pos=new THREE.Vector3(-12,3.2,1.5+8/Math.min(a,1.3));}
+  else if(v==='quad'){tgt=new THREE.Vector3(-.2,0,0);const k=1/Math.min(a,1.2);pos=new THREE.Vector3(-.2-3.2*k,2.6*k,2.6*k);}
+  else if(v==='ctrap'){tgt=new THREE.Vector3(6.5,-.3,0);pos=new THREE.Vector3(5.5,3,7/Math.min(a,1.3));}
+  else{tgt=O.clone();pos=new THREE.Vector3(O.x+6.5/Math.min(a,1.2),O.y+2.2,4.5);}
+  camAnim={p0:camera.position.clone(),t0:controls.target.clone(),p1:pos,t1:tgt,s:performance.now()};}
+document.querySelectorAll('#views button').forEach(b=>b.onclick=()=>{view(b.dataset.v);if(b.dataset.v==='quad'){specView='stability';setTabs();}});
+
+/* ---------------- controls ---------------- */
+document.querySelectorAll('#mode button').forEach(b=>b.onclick=()=>{mode=b.dataset.m;document.querySelectorAll('#mode button').forEach(x=>x.classList.toggle('on',x===b));});
+document.getElementById('res').onchange=e=>resolution=+e.target.value;
+document.getElementById('speed').oninput=e=>speed=+e.target.value;
+const pb=document.getElementById('pause');pb.onclick=()=>{paused=!paused;pb.textContent=paused?'Play':'Pause';};
+
+function resize(){const w=stage.clientWidth,h=stage.clientHeight;renderer.setSize(w,h);labelR.setSize(w,h);camera.aspect=w/h;camera.updateProjectionMatrix();}
+new ResizeObserver(resize).observe(stage);resize();
+{view('overview');camera.position.copy(camAnim.p1);controls.target.copy(camAnim.t1);camAnim=null;}
+
+/* ---------------- loop ---------------- */
+// warm-up so the beam is already flowing on load (gate closed)
+scan={type:'MS1',phase:'warm',t0:0,trapped:0,agc:0,maxIT:0};
+for(let i=0;i<560;i++){simT+=1/60;updateIons(1/60);}
+newScan();
+let last=performance.now();
+function loop(now){requestAnimationFrame(loop);let dt=Math.max(0,Math.min(.05,(now-last)/1000));last=now;
+  if(camAnim){let k=Math.min(1,(now-camAnim.s)/900);k=k<.5?2*k*k:1-Math.pow(-2*k+2,2)/2;camera.position.lerpVectors(camAnim.p0,camAnim.p1,k);controls.target.lerpVectors(camAnim.t0,camAnim.t1,k);if(k>=1)camAnim=null;}
+  if(!paused){const sdt=dt*speed;simT+=sdt;updateIons(sdt);phaseTick();if(scan.phase==='detect')sampleTransient();}
+  writeInstances();updateStatus();drawPanel();controls.update();renderer.render(scene,camera);labelR.render(scene,camera);}
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

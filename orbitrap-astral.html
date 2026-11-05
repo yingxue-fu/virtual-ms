@@ -1,0 +1,391 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Virtual Orbitrap Astral – parallel DIA in 3D</title>
+<style>
+  :root{--bg:#0a0e14;--panel:#111821;--line:#223040;--ink:#e6edf3;--mute:#8b9bb0;--acc:#5cc8ff;--acc2:#ffb454;}
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);font:13px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;overflow:hidden}
+  #app{display:flex;flex-direction:column;height:100vh}
+  @supports (height:100dvh){#app{height:100dvh}}
+  header{display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center;justify-content:space-between;padding:8px 12px;border-bottom:1px solid var(--line);background:var(--panel)}
+  .title{font-weight:650;font-size:15px}.title span{font-weight:400;color:var(--mute);font-size:12px;margin-left:6px}
+  .controls{display:flex;flex-wrap:wrap;gap:8px 10px;align-items:center}
+  label.ctl{display:inline-flex;gap:6px;align-items:center;color:var(--mute)}
+  button.btn{background:#16202b;color:var(--ink);border:1px solid var(--line);border-radius:8px;padding:5px 9px;font:inherit;cursor:pointer}
+  input[type=range]{width:90px;accent-color:var(--acc)}
+  #stage{position:relative;flex:1;min-height:0;overflow:hidden}
+  #stage canvas{display:block}
+  .labels{position:absolute;inset:0;pointer-events:none;z-index:1}
+  #views,#status,#info{z-index:2}
+  .lbl{pointer-events:auto;cursor:pointer;font-size:11px;padding:2px 7px;border-radius:10px;background:rgba(17,24,33,.82);border:1px solid #2c3d50;color:#cfe3f5;white-space:nowrap;user-select:none}
+  .lbl:hover{border-color:var(--acc);color:#fff}
+  #status{position:absolute;left:10px;top:10px;max-width:min(calc(100% - 150px),420px);background:rgba(10,14,20,.82);border:1px solid var(--line);border-radius:10px;padding:7px 10px;pointer-events:none}
+  #status b{display:block;font-size:13px;color:var(--acc2);margin-bottom:2px}
+  #status div.r{display:flex;gap:6px;font-size:11.5px;color:var(--mute);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  #status div.r i{font-style:normal;color:#cfe3f5;min-width:86px}
+  #views{position:absolute;right:10px;top:10px;display:flex;flex-direction:column;gap:5px}
+  #views button{background:rgba(17,24,33,.85);border:1px solid var(--line);color:var(--ink);border-radius:8px;padding:5px 9px;font:inherit;font-size:12px;cursor:pointer;text-align:left}
+  #views button:hover{border-color:var(--acc)}
+  #hint{position:absolute;left:10px;right:10px;bottom:8px;color:var(--mute);font-size:11px;pointer-events:none}
+  #info{position:absolute;left:10px;right:10px;bottom:10px;max-width:520px;background:rgba(14,20,28,.96);border:1px solid #2f4357;border-radius:12px;padding:12px 14px;box-shadow:0 8px 30px rgba(0,0,0,.5);max-height:62%;overflow:auto}
+  #info h3{margin:0 0 6px;font-size:14px;color:var(--acc)}#info p{margin:0 0 7px;color:#c9d6e3}
+  #info .x{position:absolute;right:8px;top:6px;background:none;border:0;color:var(--mute);font-size:18px;cursor:pointer}
+  #panel{height:225px;border-top:1px solid var(--line);background:var(--panel);display:flex;flex-direction:column}
+  .phead{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:5px 10px 0}
+  #ptitle{flex:1;min-width:0;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .seg{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden;flex:none}
+  .seg button{background:transparent;border:0;color:var(--mute);padding:3px 8px;font:inherit;font-size:11px;cursor:pointer}
+  .seg button.on{background:#1d2a38;color:var(--ink)}
+  #pwrap{flex:1;min-height:0;position:relative}#pc{position:absolute;inset:0;width:100%;height:100%}
+</style>
+<script type="importmap">
+{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"}}
+</script>
+</head>
+<body>
+<div id="app">
+  <header>
+    <div class="title">Virtual Orbitrap Astral<span>parallel MS1 + DIA MS2, in 3D</span></div>
+    <div class="controls">
+      <label class="ctl">Speed <input id="speed" type="range" min="0.1" max="3" step="0.1" value="1"></label>
+      <button class="btn" id="pause">Pause</button>
+    </div>
+  </header>
+  <main id="stage">
+    <div id="status"><b id="stT">Starting…</b><div id="stRows"></div></div>
+    <div id="views">
+      <button data-v="overview">Overview</button>
+      <button data-v="front">Front end</button>
+      <button data-v="ctrap">C-trap · Orbitrap</button>
+      <button data-v="ip">Ion processor</button>
+      <button data-v="astral">Astral analyzer</button>
+          </div>
+    <div id="hint">Tap a part to see what it does · drag to rotate · colour = m/z (violet low → red high)</div>
+    <div id="info" hidden><button class="x" id="infoX" aria-label="Close">×</button><h3 id="infoT"></h3><div id="infoB"></div></div>
+  </main>
+  <section id="panel">
+    <div class="phead"><span id="ptitle"></span>
+      <span class="seg" id="tabs"><button data-t="timeline" class="on">Parallel timeline</button><button data-t="spectra">Spectra</button></span></div>
+    <div id="pwrap"><canvas id="pc"></canvas></div>
+  </section>
+</div>
+
+<script type="module">
+import * as THREE from 'three';
+import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
+import {CSS2DRenderer, CSS2DObject} from 'three/addons/renderers/CSS2DRenderer.js';
+import {RoomEnvironment} from 'three/addons/environments/RoomEnvironment.js';
+
+const rnd=(a,b)=>a+Math.random()*(b-a);
+const gauss=()=>Math.sqrt(-2*Math.log(1-Math.random()))*Math.cos(2*Math.PI*Math.random());
+const mzColor=mz=>new THREE.Color().setHSL(0.76*(1-Math.min(1,Math.max(0,(mz-150)/1250))),0.9,0.6);
+
+/* ============ simulated precursors + narrow-window DIA scheme ============ */
+const PREC=[];
+for(let i=0;i<1500;i++){const mz=380+600*Math.pow(Math.random(),1.25);const z=Math.random()<.7?2:3;
+  const frags=[];const mx=Math.min(1400,mz*z-80);for(let j=0;j<8;j++)frags.push({mz:rnd(150,mx),I:Math.random()});
+  PREC.push({mz,z,I:Math.exp(1.1*gauss()),frags,col:mzColor(mz)});}
+const NWIN=300,WLO=380,WW=2;   // nDIA-style: 300 windows of 2 Th from m/z 380 to 980
+const winLo=w=>WLO+WW*w;
+const BYWIN=Array.from({length:NWIN},()=>[]);for(const p of PREC){const w=Math.floor((p.mz-WLO)/WW);if(w>=0&&w<NWIN)BYWIN[w].push(p);}
+const PW=PREC.reduce((a,p)=>a+p.I,0);
+function pickAny(){let r=Math.random()*PW;for(const p of PREC){r-=p.I;if(r<=0)return p;}return PREC[0];}
+
+/* ============ acquisition schedule (slots) ============
+   slot s: s%9===0 → MS1 (quad open, packet → C-trap → Orbitrap); otherwise MS2 window.
+   MS2 packet pipeline: slot s quad + IRM fill → s+1 ion processor (HCD) → s+2 Astral flight.
+   MS1 packet: slot s fill → Orbitrap transient during s+1 … s+9, overlapping 8 MS2 scans. */
+const D=3.0,PER=9;
+const isMS1=s=>s>=0&&s%PER===0;
+function winOf(s){if(s<0||isMS1(s))return null;const n=s-Math.floor(s/PER)-1;return (n*37)%NWIN;}
+let simT=-5,curSlot=-1,speed=1,paused=false;
+const slotOf=t=>Math.floor(t/D);
+
+/* ============ scene ============ */
+const stage=document.getElementById('stage');
+const renderer=new THREE.WebGLRenderer({antialias:true});renderer.setPixelRatio(Math.min(devicePixelRatio,2));renderer.toneMapping=THREE.ACESFilmicToneMapping;stage.prepend(renderer.domElement);
+const labelR=new CSS2DRenderer();labelR.domElement.className='labels';stage.appendChild(labelR.domElement);
+const scene=new THREE.Scene();scene.background=new THREE.Color(0x0a0e14);
+scene.environment=new THREE.PMREMGenerator(renderer).fromScene(new RoomEnvironment(),0.04).texture;
+const camera=new THREE.PerspectiveCamera(45,1,0.05,600);
+const controls=new OrbitControls(camera,renderer.domElement);controls.enableDamping=true;
+scene.add(new THREE.HemisphereLight(0xbfd8ff,0x101418,0.6));const dl=new THREE.DirectionalLight(0xffffff,1.2);dl.position.set(5,10,8);scene.add(dl);
+const grid=new THREE.GridHelper(120,60,0x1a2633,0x121b25);grid.position.y=-4.2;scene.add(grid);
+const M=(c,o={})=>new THREE.MeshStandardMaterial({color:c,metalness:.85,roughness:.32,...o});
+const mGold=M(0xd8ab4f),mGold2=M(0xb98a35),mSteel=M(0xa9b4c2),mCopper=M(0xc27a52);
+const mGlass=c=>new THREE.MeshStandardMaterial({color:c,metalness:.5,roughness:.2,transparent:true,opacity:.14,side:THREE.DoubleSide,depthWrite:false});
+const pickables=[];
+function comp(key,label,lp){const g=new THREE.Group();g.userData.key=key;scene.add(g);
+  const d=document.createElement('div');d.className='lbl';d.textContent=label;d.addEventListener('click',e=>{e.stopPropagation();showInfo(key);});
+  const o=new CSS2DObject(d);o.position.copy(lp);scene.add(o);return g;}
+function add(g,m){m.userData.key=g.userData.key;g.add(m);pickables.push(m);return m;}
+function rodsX(g,x0,x1,r,n,rr,mat,phase=0){for(let k=0;k<n;k++){const a=phase+k*2*Math.PI/n;const m=add(g,new THREE.Mesh(new THREE.CylinderGeometry(rr,rr,x1-x0,12),mat));m.rotation.z=Math.PI/2;m.position.set((x0+x1)/2,r*Math.cos(a),r*Math.sin(a));}}
+function housing(g,x0,x1,r,c){const h=add(g,new THREE.Mesh(new THREE.CylinderGeometry(r,r,x1-x0,32,1,true),mGlass(c)));h.rotation.z=Math.PI/2;h.position.set((x0+x1)/2,0,0);}
+function smallLbl(t,pos){const d=document.createElement('div');d.className='lbl';d.style.cssText='font-size:10px;opacity:.85';d.textContent=t;const o=new CSS2DObject(d);o.position.copy(pos);scene.add(o);}
+
+/* ---- scale: 1 scene unit = 20 mm.
+   Published (Stewart et al. 2023/2024, Thermo ASMS 2023): mirrors 5 electrodes each, effective inter-mirror separation ≈ 640 mm,
+   drift reversal ≈ 335 mm from injection, ~24 oscillations (>30 m), injection angle ≈ 2°, mirror convergence ≈ 0.3 mm,
+   350 mm octapole before the ion processor, ion processor r0 = 2 mm, ion foil plates above and below the beam.
+   Everything else (front-end lengths, Orbitrap size, mirror block height/length, foil outline) is an estimate. ---- */
+const MM=1/20;
+
+// front-end path ESI → quad entrance
+const path=new THREE.CatmullRomCurve3([new THREE.Vector3(-36,0,1.5),new THREE.Vector3(-35.6,0,1.5),new THREE.Vector3(-35,0,1.5),new THREE.Vector3(-30,0,1.5),
+  new THREE.Vector3(-26.6,0,1.5),new THREE.Vector3(-26.2,0,1.5),new THREE.Vector3(-24.5,0,1.3),new THREE.Vector3(-22.7,0,.6),new THREE.Vector3(-20.9,0,.08),new THREE.Vector3(-19.2,0,0),new THREE.Vector3(-18.5,0,0)],false,'centripetal');
+const PLEN=path.getLength();
+function uAtX(x){let b=0,bd=1e9;for(let i=0;i<=1500;i++){const u=i/1500,d=Math.abs(path.getPointAt(u).x-x);if(d<bd){bd=d;b=u;}}return b;}
+const uCapIn=uAtX(-35),uCapOut=uAtX(-30),uFunOut=uAtX(-26.6),uBend=uAtX(-26.2);
+const UP=new THREE.Vector3(0,1,0);
+const fr=u=>{u=Math.min(Math.max(u,.001),.998);const T=path.getTangentAt(u),side=new THREE.Vector3().crossVectors(T,UP).normalize(),up2=new THREE.Vector3().crossVectors(side,T).normalize();return{T,side,up2};};
+const NEUTRAL_END=-21;
+
+{const g=comp('esi','ESI source',new THREE.Vector3(-37,.8,1.5));
+ const n=add(g,new THREE.Mesh(new THREE.CylinderGeometry(.05,.05,2.4,16),mSteel));n.rotation.z=Math.PI/2;n.position.set(-37.4,0,1.5);
+ const t=add(g,new THREE.Mesh(new THREE.ConeGeometry(.05,.3,16),mSteel));t.rotation.z=-Math.PI/2;t.position.set(-36.1,0,1.5);
+ const sw=add(g,new THREE.Mesh(new THREE.ConeGeometry(.9,.6,40,1,true),M(0x9aa3ae,{side:THREE.DoubleSide})));sw.rotation.z=Math.PI/2;sw.position.set(-35.3,0,1.5);}
+{const g=comp('tube','Ion transfer tube',new THREE.Vector3(-32.5,.6,1.5));
+ const c=add(g,new THREE.Mesh(new THREE.CylinderGeometry(.16,.16,5,24,1,true),M(0xb8a89a,{transparent:true,opacity:.5,side:THREE.DoubleSide,emissive:0x3a1400,depthWrite:false})));c.rotation.z=Math.PI/2;c.position.set(-32.5,0,1.5);
+ const coil=[];for(let i=0;i<=400;i++){const t=i/400,a=t*Math.PI*2*22;coil.push(new THREE.Vector3(-34.2+3.2*t,.32*Math.cos(a),1.5+.32*Math.sin(a)));}
+ add(g,new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(coil),800,.035,6),mCopper));}
+{const g=comp('funnel','Ion funnel',new THREE.Vector3(-28.1,1.3,1.5));
+ for(let i=0;i<14;i++){const s=i/13,x=-29.6+3*s,r=1.0-.82*s;const t=add(g,new THREE.Mesh(new THREE.TorusGeometry(r,.03,8,48),i%2?mSteel:mGold2));t.rotation.y=Math.PI/2;t.position.set(x,0,1.5);}}
+{const g=comp('guide','Bent beam guide',new THREE.Vector3(-22.7,.7,1.1));const u0=uBend,u1=uAtX(-19.2);
+ for(let k=0;k<4;k++){const a=Math.PI/4+k*Math.PI/2,pts=[];for(let i=0;i<=40;i++){const u=u0+(u1-u0)*i/40,f=fr(u);pts.push(path.getPointAt(u).add(f.up2.clone().multiplyScalar(.22*Math.cos(a))).add(f.side.clone().multiplyScalar(.22*Math.sin(a))));}
+  add(g,new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts),60,.04,8),mCopper));}}
+const QX0=-18.5,QX1=-9.5,QR=.3;
+{const g=comp('quad','Quadrupole',new THREE.Vector3(-14,.75,0));const geo=new THREE.CylinderGeometry(.13,.13,QX1-QX0,24);
+ [[QR+.1,0,mGold],[-QR-.1,0,mGold],[0,QR+.1,mGold2],[0,-QR-.1,mGold2]].forEach(([y,z,m])=>{const r=add(g,new THREE.Mesh(geo,m));r.rotation.z=Math.PI/2;r.position.set((QX0+QX1)/2,y,z);});}
+// C-trap (bent trap) + ultra-high-field Orbitrap (small!)
+const CTX=-8.4,ctrapY=x=>-0.25*Math.pow((x-CTX)/0.8,2);
+{const g=comp('ctrap','Bent trap (C-trap)',new THREE.Vector3(CTX,.7,0));
+ [[.2,0],[-.2,0],[0,.2],[0,-.2]].forEach(([oy,oz])=>{const pts=[];for(let i=0;i<=20;i++){const x=CTX-.8+1.6*i/20;pts.push(new THREE.Vector3(x,ctrapY(x)+oy,oz));}add(g,new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts),30,.05,10),mSteel));});}
+const O=new THREE.Vector3(CTX,-2.6,0),OS=.4;   // Orbitrap drawn ~38 mm long, ~26 mm wide (estimate)
+{const g=comp('orbi','Orbitrap (MS1)',new THREE.Vector3(CTX+1.5,-2.6,0));g.position.copy(O);g.scale.setScalar(OS);
+ const cp=[new THREE.Vector2(0,-2.45)];for(let i=0;i<=40;i++){const z=-2.4+4.8*i/40;cp.push(new THREE.Vector2(.16+.3*(1-(z/2.4)**2),z));}cp.push(new THREE.Vector2(0,2.45));
+ const cg=new THREE.LatheGeometry(cp,48);cg.rotateX(Math.PI/2);add(g,new THREE.Mesh(cg,mSteel));
+ const ro=z=>.95+.65*(1-(z/2.4)**2);
+ for(const sgn of[1,-1]){const op=[];for(let i=0;i<=30;i++){const z=sgn*(0.06+2.34*i/30);op.push(new THREE.Vector2(ro(z),z));}
+  const og=new THREE.LatheGeometry(sgn>0?op:op.reverse(),64);og.rotateX(Math.PI/2);add(g,new THREE.Mesh(og,new THREE.MeshStandardMaterial({color:0xff4d6d,emissive:0x5a0d1c,metalness:.5,roughness:.3,transparent:true,opacity:.35,side:THREE.DoubleSide,depthWrite:false})));}}
+// IRM, transfer octapole, ion processor
+const IRM={x0:-7,x1:-1};
+{const g=comp('irm','Ion routing multipole',new THREE.Vector3(-4,.75,0));rodsX(g,IRM.x0,IRM.x1,.25,4,.06,mCopper,Math.PI/4);housing(g,IRM.x0,IRM.x1,.45,0x6fb7ff);}
+const OCT={x0:-.6,x1:-.6+350*MM};
+{const g=comp('oct','Transfer octapole (350 mm)',new THREE.Vector3((OCT.x0+OCT.x1)/2,.6,0));rodsX(g,OCT.x0,OCT.x1,.2,8,.025,mSteel);}
+const IP={x0:17.3,xm:19.3,x1:20.8};
+{const g=comp('ip','Ion processor',new THREE.Vector3(19,.75,0));rodsX(g,IP.x0,IP.xm,.16,4,.06,mCopper,Math.PI/4);housing(g,IP.x0,IP.xm,.4,0x6fb7ff);
+ rodsX(g,IP.xm+.1,IP.x1,.16,4,.06,mSteel,Math.PI/4);housing(g,IP.xm+.1,IP.x1,.36,0x9fa8ff);}
+smallLbl('high P · HCD',new THREE.Vector3(18.3,-.75,0));smallLbl('low P · extract',new THREE.Vector3(20.1,-.75,0));
+// injection optics: letterbox lenses + prism deflector. Layout follows the plan-view schematic in Stewart et al. 2023:
+// mirrors start well before the injection prism, detector + second prism sit at the proximal end beside the beam axis.
+const A={x0:23.4,Ld:335*MM,W:640*MM,N:24,tilt:6*MM};   // tilt drawn ×20 (real convergence ≈ 0.3 mm)
+const AENTRY=new THREE.Vector3(A.x0,0,0),DET=new THREE.Vector3(A.x0-3.2,0,-6.5);
+{const g=comp('inj','Injection optics',new THREE.Vector3(21.9,.8,0));
+ for(const x of[21.2,22.0]){const l=add(g,new THREE.Mesh(new THREE.BoxGeometry(.12,.9,1.4),mSteel));l.position.set(x,0,0);const h=add(g,new THREE.Mesh(new THREE.BoxGeometry(.13,.12,.9),new THREE.MeshBasicMaterial({color:0x0a0e14})));h.position.set(x,0,0);}
+ const pr=new THREE.Shape();pr.moveTo(0,-.7);pr.lineTo(1.0,0);pr.lineTo(0,.7);pr.lineTo(0,-.7);const pg=new THREE.ExtrudeGeometry(pr,{depth:.06,bevelEnabled:false});pg.rotateX(Math.PI/2);
+ for(const y of[.25,-.19]){const m=add(g,new THREE.Mesh(pg,mSteel));m.position.set(22.4,y,0);}
+ for(const y of[.25,-.19]){const m=add(g,new THREE.Mesh(pg,mSteel));m.rotation.y=Math.PI/2;m.position.set(A.x0-2.8,y,3.3);}}   // second prism
+smallLbl('prism 2',new THREE.Vector3(A.x0-2.8,-.8,4.4));
+// mirror blocks: 5 electrodes each (pairs above/below a slit), ~480 mm long, faces ~450 mm apart (from schematic proportions)
+const mSlab=M(0xb7bec8,{roughness:.45}),mSlab2=M(0x8f98a4,{roughness:.45});
+const MIR={len:480*MM,x0:A.x0-5.5,face:11.25,th:.9,gap:.4,h:1.6,slit:.25};
+{const g=comp('mirrors','Asymmetric ion mirrors',new THREE.Vector3(A.x0+9,2.4,-MIR.face-3.5));
+ for(const side of[1,-1]){const grp=new THREE.Group();grp.position.set(MIR.x0,0,side*MIR.face);if(side<0)grp.rotation.y=-Math.atan(A.tilt/MIR.len);g.add(grp);
+  for(let i=0;i<5;i++)for(const sy of[1,-1]){const th=i===0?MIR.th*1.4:MIR.th;const zc=side*(i===0?th/2:MIR.th*1.4+MIR.gap+(i-1)*(MIR.th+MIR.gap)+MIR.th/2);
+    const b=add(grp,new THREE.Mesh(new THREE.BoxGeometry(MIR.len,MIR.h,th),i%2?mSlab2:mSlab));b.userData.key='mirrors';b.position.set(MIR.len/2,sy*(MIR.slit+MIR.h/2),zc);}}}
+// Ion foil, traced from the schematic (plan view): a central bell that starts at the injection prism and widens with drift,
+// plus two outer wedges near the mirrors that narrow with drift. Plates sit above and below the beam.
+function foilShape(pts){const sh=new THREE.Shape();sh.moveTo(pts[0][0],pts[0][1]);for(const q of pts.slice(1))sh.lineTo(q[0],q[1]);const g=new THREE.ShapeGeometry(sh);g.rotateX(Math.PI/2);return g;}
+const FL=16.2,ns=48;
+const bell=[],up=[],lo=[];
+for(let i=0;i<=ns;i++){const s=i/ns,x=FL*s;bell.push([x,-(3.0*Math.pow(s,.6))]);}
+for(let i=ns;i>=0;i--){const s=i/ns,x=FL*s;bell.push([x,4.1*Math.pow(s,.6)]);}
+for(let i=0;i<=ns;i++){const s=i/ns;up.push([-1.6+(FL+1.6)*s,-(4.2+3.6*Math.pow(s,.7))]);}up.push([FL,-8.9],[-1.6,-8.9]);
+for(let i=0;i<=ns;i++){const s=i/ns;lo.push([-1.6+(FL+1.6)*s,6.6+1.7*Math.pow(s,.8)-.5*Math.sin(Math.PI*s)]);}lo.push([FL,9.6],[-1.6,9.6]);
+// ShapeGeometry y → scene +z after rotateX(π/2); −z = detector / tilted-mirror side (top of the schematic; top of the screen in the Astral view)
+{const g=comp('foil','Ion foil',new THREE.Vector3(A.x0+9,1.3,3));
+ const mC=new THREE.MeshStandardMaterial({color:0x1f8a78,metalness:.5,roughness:.35,transparent:true,opacity:.45,side:THREE.DoubleSide,depthWrite:false});
+ const mO=new THREE.MeshStandardMaterial({color:0x9fbf9a,metalness:.4,roughness:.4,transparent:true,opacity:.35,side:THREE.DoubleSide,depthWrite:false});
+ for(const y of[.6,-.6]){for(const [pts,m] of[[bell,mC],[up,mO],[lo,mO]]){const f=add(g,new THREE.Mesh(foilShape(pts),m));f.position.set(A.x0,y,0);}}}
+{const g=comp('det','HDR detector',new THREE.Vector3(DET.x-.6,1.4,DET.z-.8));
+ const d=add(g,new THREE.Mesh(new THREE.BoxGeometry(1.2,1.0,.15),M(0x3a3f4a,{emissive:0x0b2236})));d.position.copy(DET).add(new THREE.Vector3(0,0,-.35));
+ for(let i=0;i<4;i++){const r=add(g,new THREE.Mesh(new THREE.BoxGeometry(1.0,.9,.05),mGold2));r.position.copy(DET).add(new THREE.Vector3(0,0,.1+.18*i));}}
+// ion motion: drift out ~335 mm and back while zigzagging across the 640 mm effective gap; first pass heads to −z, ends on the detector
+function astralPos(s,out){const x=A.x0+A.Ld*Math.sin(Math.PI*s);const tw=(2/Math.PI)*Math.asin(Math.sin(2*Math.PI*A.N*s));
+  const half=A.W/2-(tw<0?A.tilt*(x-MIR.x0)/MIR.len:0);const e=Math.pow(s,14);return out.set(x+(DET.x-A.x0)*e,0,half*tw+DET.z*e);}
+{const pts=[];for(let i=0;i<=6000;i++)pts.push(astralPos(i/6000,new THREE.Vector3()));
+ scene.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts),new THREE.LineBasicMaterial({color:0xff4d6d,transparent:true,opacity:.3})));}
+/* ============ ions ============ */
+const MAXI=4000;
+const ions=new THREE.InstancedMesh(new THREE.SphereGeometry(.08,10,8),new THREE.MeshBasicMaterial({color:0xffffff}),MAXI);
+ions.instanceMatrix.setUsage(THREE.DynamicDrawUsage);ions.setColorAt(0,new THREE.Color());ions.frustumCulled=false;ions.count=0;scene.add(ions);
+const WHITE=new THREE.Color(1,1,1),GREY=new THREE.Color(0x6b7280);
+let parts=[];
+const V_FRONT=4.4,V_FLY=8;
+function spawn(){if(Math.random()<.1){parts.push({neutral:true,state:'path',u:0,v:rnd(3.2,4),pos:new THREE.Vector3(),dy:rnd(-1,1),dz:rnd(-1,1),ph:rnd(0,6.3),ph2:rnd(0,6.3),scale:1.6,col:GREY.clone()});return;}
+  const bx=rnd(IRM.x0+.3,IRM.x1-.3);const tIrm=simT+PLEN/V_FRONT+(bx-QX0)/V_FLY;const s=slotOf(tIrm);const w=winOf(s);
+  let pr;if(w!==null&&BYWIN[w].length&&Math.random()<.35)pr=BYWIN[w][Math.floor(Math.random()*BYWIN[w].length)];else pr=pickAny();
+  parts.push({pr,mz:pr.mz,slot:s,bx,state:'path',u:0,v:V_FRONT,pos:new THREE.Vector3(),dy:rnd(-1,1),dz:rnd(-1,1),ph:rnd(0,6.3),ph2:rnd(0,6.3),scale:1,col:pr.col.clone()});}
+function die(p){if(p.state==='dying'||p.dead)return;p.state='dying';p.dieT=simT;p.s0=p.scale;}
+function flash(pos,c=WHITE){parts.push({state:'flash',pos:pos.clone(),col:c.clone(),c0:c.clone(),scale:1,t0:simT});}
+function moveTo(p,to,dur,after,ctrl=null){p.mv={from:p.pos.clone(),to,ctrl,t0:simT,dur};p.state='move';p.after=after;}
+function amp(u){if(u<uCapIn){const s=u/uCapIn;return .03+.3*Math.sin(Math.PI*s)*(1-.5*s);}if(u<uCapOut)return .06;if(u<uFunOut){const s=(u-uCapOut)/(uFunOut-uCapOut);return .06+.6*Math.sin(Math.PI*s)*(1-s);}return .08;}
+
+function onSlot(S){
+  for(const p of parts){if(p.dead)continue;
+    if(p.state==='irm'&&p.slot===S-1){
+      if(isMS1(p.slot)){moveTo(p,new THREE.Vector3(rnd(CTX-.55,CTX+.55),0,0),.5,'ct');p.ejT=simT+rnd(.6,.7);}
+      else{moveTo(p,new THREE.Vector3(rnd(IP.x0+.2,IP.xm-.2),rnd(-.04,.04),rnd(-.04,.04)),.8,'hp');p.fragAt=simT+rnd(.9,1.4);p.lpAt=simT+1.7;}}
+    else if(p.state==='lp'&&p.slot===S-2){p.injT=simT+rnd(0,.05);}
+  }
+  const done=S-3;if(done>=0&&!isMS1(done))lastMS2={w:winOf(done),slot:done};
+  if(S-10>=0&&isMS1(S-10))lastMS1={slot:S-10};
+}
+let lastMS1=null,lastMS2=null;
+function fragment(p){flash(p.pos,new THREE.Color(.8,.8,.8));parts[parts.length-1].small=true;const ks=[...p.pr.frags].sort(()=>Math.random()-.5).slice(0,2+(Math.random()<.5?1:0));
+  for(const f of ks){const c={pr:p.pr,mz:f.mz,slot:p.slot,state:'hp',lpAt:p.lpAt,pos:p.pos.clone().add(new THREE.Vector3(rnd(-.25,.25),rnd(-.03,.03),rnd(-.03,.03))),dy:rnd(-1,1),dz:rnd(-1,1),ph:rnd(0,6.3),ph2:rnd(0,6.3),scale:1,col:mzColor(f.mz)};c.base=c.pos.clone();parts.push(c);}
+  p.dead=true;}
+function update(dt){
+  let sa=update.acc=(update.acc||0)+dt*115;while(update.acc>=1){update.acc--;spawn();}
+  const S=slotOf(simT);if(S!==curSlot){for(let s=curSlot+1;s<=S;s++)onSlot(s);curSlot=S;}
+  for(const p of parts){if(p.dead)continue;
+   switch(p.state){
+    case 'path':{p.u+=p.v*dt/PLEN;
+      if(p.neutral&&p.u>=uBend){p.state='straight';break;}
+      if(p.u>=1){p.u=1;if(p.slot<0){die(p);break;}const w=winOf(p.slot);
+        if(w!==null&&(p.mz<winLo(w)||p.mz>winLo(w)+WW)){p.state='rej';p.fx0=QX0;p.pos.x=QX0;p.fax=Math.random()<.5;break;}
+        p.state='fly';p.pos.set(QX0,0,0);break;}
+      const u=Math.min(p.u,.998),f=fr(u),a=amp(u);p.pos.copy(path.getPointAt(u));
+      if(u<uCapIn)p.pos.addScaledVector(f.up2,a*p.dy).addScaledVector(f.side,a*p.dz);else p.pos.addScaledVector(f.up2,a*p.dy*Math.cos(5*simT+p.ph)).addScaledVector(f.side,a*p.dz*Math.sin(6.5*simT+p.ph2));
+      if(!p.neutral){if(u<uCapOut){const k=u/uCapOut;p.scale=2.6-1.6*k;p.col.copy(WHITE).lerp(p.pr.col,k*k);}else{p.scale=1;p.col.copy(p.pr.col);}}
+      break;}
+    case 'straight':p.pos.x+=p.v*dt;if(p.pos.x>NEUTRAL_END)die(p);break;
+    case 'rej':{p.pos.x+=2.6*dt;const Aa=.06*Math.exp(1.2*(p.pos.x-p.fx0));const o=Aa*Math.sin(14*simT+p.ph);p.pos.y=p.fax?o:.04*Math.sin(9*simT);p.pos.z=p.fax?.04*Math.cos(9*simT):o;if(Aa>.3){p.col.setRGB(1,.35,.3);die(p);}break;}
+    case 'fly':{p.pos.x+=V_FLY*dt;const inC=Math.abs(p.pos.x-CTX)<.8;p.pos.y=(inC?ctrapY(p.pos.x):0)+.06*p.dy*Math.cos(12*simT+p.ph);p.pos.z=.06*p.dz*Math.sin(13*simT+p.ph2);
+      if(p.pos.x>=p.bx){p.state='irm';p.base=new THREE.Vector3(p.bx,0,0);}break;}
+    case 'irm':case 'hp':{const b=p.base||(p.base=p.pos.clone());const j=p.state==='hp'?.025:.05;p.pos.set(b.x+.15*Math.sin(3*simT+p.ph),b.y+j*Math.sin(7*simT+p.ph2),b.z+j*Math.cos(6*simT+p.ph));
+      if(p.state==='hp'){if(p.fragAt&&simT>=p.fragAt){fragment(p);break;}if(simT>=p.lpAt&&!p.fragAt){moveTo(p,new THREE.Vector3(rnd(IP.xm+.6,IP.x1-.4),rnd(-.015,.015),rnd(-.015,.015)),.45,'lp');}}
+      break;}
+    case 'lp':{const b=p.base;p.pos.set(b.x+.05*Math.sin(5*simT+p.ph),b.y,b.z);if(p.injT&&simT>=p.injT){p.injT=0;moveTo(p,AENTRY.clone(),.3,'astral');}break;}
+    case 'ct':{p.pos.set(p.base.x+.05*Math.sin(5*simT+p.ph),ctrapY(p.base.x)+.02*Math.sin(7*simT+p.ph2),.02*Math.cos(6*simT+p.ph));
+      if(simT>=p.ejT){moveTo(p,new THREE.Vector3(O.x,O.y+1.25*OS,1.5*OS),.32*Math.sqrt(p.mz/400),'orbit',new THREE.Vector3(O.x,-1.1,.3));}break;}
+    case 'orbit':{const o=p.orb,t=simT-o.t0,R=OS*(1+.25*Math.exp(-t/.4)),phi=Math.PI/2+o.wphi*t;p.pos.set(O.x+R*Math.cos(phi),O.y+R*Math.sin(phi),o.A*Math.cos(o.wz*t));
+      if(simT>=o.end)die(p);break;}
+    case 'astral':{const t=simT-p.t0,Tf=p.Tf,sN=Math.min(t/Tf,1);astralPos(sN,p.pos);p.pos.y+=.12*p.dy*Math.cos(9*t+p.ph)*Math.exp(-3*sN);
+      if(t>=Tf){p.pos.copy(DET);flash(p.pos,p.col);p.dead=true;}break;}
+    case 'move':{const m=p.mv;let k=(simT-m.t0)/m.dur;if(k>1)k=1;const e=k<.5?2*k*k:1-Math.pow(-2*k+2,2)/2;
+      if(m.ctrl){const q=1-e;p.pos.set(0,0,0).addScaledVector(m.from,q*q).addScaledVector(m.ctrl,2*q*e).addScaledVector(m.to,e*e);}else p.pos.lerpVectors(m.from,m.to,e);
+      if(k>=1){p.state=p.after;p.base=m.to.clone();
+        if(p.state==='orbit'){const wz=2*Math.PI*1.25*Math.sqrt(500/p.mz);p.orb={t0:simT,wz,wphi:.5*wz*(1+rnd(-.06,.06)),A:1.5*OS*(1+rnd(-.04,.04)),end:(p.slot+9)*D+.9*D};}
+        if(p.state==='astral'){p.t0=simT;p.Tf=2.2*Math.sqrt(p.mz/1000);}
+        if(p.state==='hp')p.fragAt=p.fragAt??null;}
+      break;}
+    case 'flash':{const k=(simT-p.t0)/.35;p.scale=1+(p.small?2.5:5)*k;p.col.copy(p.c0).multiplyScalar(Math.max(0,1-k));if(k>=1)p.dead=true;break;}
+    case 'dying':{const k=(simT-p.dieT)/.4;p.scale=p.s0*(1-k);if(k>=1)p.dead=true;break;}
+   }}
+  parts=parts.filter(p=>!p.dead);if(parts.length>MAXI)parts.splice(0,parts.length-MAXI);
+}
+const mtx=new THREE.Matrix4(),qI=new THREE.Quaternion(),sv=new THREE.Vector3();
+const SMALL=new Set(['fly','irm','hp','lp','ct','orbit','rej']);
+function writeInstances(){let n=0;for(const p of parts){const f=SMALL.has(p.state)||(p.state==='move'&&p.after!=='astral')?.5:1;sv.setScalar(Math.max(p.scale*f,1e-4));mtx.compose(p.pos,qI,sv);ions.setMatrixAt(n,mtx);ions.setColorAt(n,p.col);n++;}
+  ions.count=n;ions.instanceMatrix.needsUpdate=true;if(ions.instanceColor)ions.instanceColor.needsUpdate=true;}
+
+/* ============ status ============ */
+const wtxt=w=>`${winLo(w)}–${winLo(w)+WW}`;
+const stT=document.getElementById('stT'),stRows=document.getElementById('stRows');
+function updateStatus(){const S=curSlot;if(S<0){stT.textContent='Ion beam starting…';stRows.innerHTML='';return;}
+  const n=S-Math.floor(S/PER);const busy=[S>=0,S>=1,S-1>=0&&!isMS1(S-1),S-2>=0&&!isMS1(S-2),S>=1&&Math.floor((S-1)/PER)*PER>=0].filter(Boolean).length;
+  stT.textContent=(isMS1(S)?'Filling the MS1 packet':`DIA MS2 scan ${n}`)+` · ${busy} packet${busy>1?'s':''} in play`;
+  const rows=[];
+  rows.push(['Quadrupole',isMS1(S)?'open (full range for MS1)':`isolating m/z ${wtxt(winOf(S))}`]);
+  rows.push(['Ion processor',S-1>=0&&!isMS1(S-1)?`HCD of window ${wtxt(winOf(S-1))}`:'idle']);
+  rows.push(['Astral',S-2>=0&&!isMS1(S-2)?`measuring window ${wtxt(winOf(S-2))}`:'idle']);
+  const m1=Math.floor((S-1)/PER)*PER;rows.push(['Orbitrap',S>=1&&S-m1>=1&&S-m1<=9&&m1>=0?`MS1 transient (${S-m1}/9)`:'waiting for MS1 packet']);
+  stRows.innerHTML=rows.map(r=>`<div class="r"><i>${r[0]}</i>${r[1]}</div>`).join('');}
+
+/* ============ panel ============ */
+const cv=document.getElementById('pc'),cx=cv.getContext('2d');let tab='timeline';
+document.querySelectorAll('#tabs button').forEach(b=>b.onclick=()=>{tab=b.dataset.t;document.querySelectorAll('#tabs button').forEach(x=>x.classList.toggle('on',x===b));});
+const ROWS=['Quadrupole','IRM','Ion processor','Astral','Orbitrap'];
+function blocks(s){const out=[];if(s<0)return out;
+  if(isMS1(s)){out.push([0,s,s+1,'MS1','#ffb454']);out.push([1,s,s+1.25,'MS1','#ffb454']);out.push([4,s+1.3,s+9.9,'MS1 transient (240k)','#ffb454']);}
+  else{const w=winOf(s),c='#'+mzColor(winLo(w)).getHexString(),t=String(winLo(w));out.push([0,s,s+1,t,c]);out.push([1,s,s+1,t,c]);out.push([2,s+1,s+2,t,c]);out.push([3,s+2,s+3,t,c]);}
+  return out;}
+function drawPanel(){const dpr=Math.min(devicePixelRatio,2),W=cv.clientWidth,H=cv.clientHeight;if(!W||!H)return;
+  if(cv.width!==Math.round(W*dpr)||cv.height!==Math.round(H*dpr)){cv.width=Math.round(W*dpr);cv.height=Math.round(H*dpr);}
+  cx.setTransform(dpr,0,0,dpr,0,0);cx.clearRect(0,0,W,H);cx.font='10px system-ui,sans-serif';const title=document.getElementById('ptitle');
+  if(tab==='timeline'){
+    title.textContent='Who is busy with which packet (animation slot ≈ 5 ms in real life)';
+    const L=78,T=6,w=W-L-8,rh=(H-T-22)/ROWS.length,now=simT/D,span=Math.max(7,Math.min(12,w/34)),t0=now-span*.62,X=t=>L+(t-t0)/span*w;
+    ROWS.forEach((r,i)=>{cx.fillStyle='#8b9bb0';cx.fillText(r,6,T+rh*i+rh/2+3);cx.strokeStyle='#1b2733';cx.beginPath();cx.moveTo(L,T+rh*(i+1));cx.lineTo(L+w,T+rh*(i+1));cx.stroke();});
+    cx.save();cx.beginPath();cx.rect(L,0,w,H);cx.clip();
+    for(let s=Math.floor(t0)-10;s<=t0+span+1;s++)for(const [r,a,b,t,c] of blocks(s)){const x0=X(a)+1,x1=X(b)-1;if(x1<L||x0>L+w)continue;const y=T+rh*r+3,hh=rh-6;
+      cx.globalAlpha=b<now?.4:a>now?.55:1;cx.fillStyle=c;cx.fillRect(x0,y,x1-x0,hh);cx.globalAlpha=1;cx.fillStyle='#0a0e14';if(x1-x0>24)cx.fillText(t,Math.max(x0,L)+3,y+hh/2+3);}
+    cx.restore();cx.strokeStyle='#fff';cx.beginPath();cx.moveTo(X(now),T);cx.lineTo(X(now),H-18);cx.stroke();cx.fillStyle='#fff';cx.fillText('now',X(now)-9,H-6);
+    cx.fillStyle='#8b9bb0';cx.fillText('MS2 blocks labelled by window start m/z',L+w-190,H-6);
+  }else{
+    title.textContent=lastMS2?`Orbitrap MS1 (top) · Astral MS2 of window ${wtxt(lastMS2.w)} (bottom)`:'Spectra appear once the first packets are measured';
+    const L=10,w=W-20,h1=(H-40)/2,T1=6,T2=T1+h1+18;
+    const draw=(T,h,lo,hi,peaks,col,label)=>{cx.strokeStyle='#2b3a4b';cx.beginPath();cx.moveTo(L,T+h);cx.lineTo(L+w,T+h);cx.stroke();
+      const mx=Math.max(1e-6,...peaks.map(p=>p.I));for(const p of peaks){const x=L+(p.mz-lo)/(hi-lo)*w;cx.strokeStyle=col||('#'+mzColor(p.mz).getHexString());cx.beginPath();cx.moveTo(x,T+h);cx.lineTo(x,T+h-p.I/mx*h);cx.stroke();}
+      cx.fillStyle='#8b9bb0';cx.fillText(`${lo}`,L,T+h+11);cx.fillText(`${hi}`,L+w-22,T+h+11);cx.fillText(label,L+w/2-40,T+h+11);};
+    if(lastMS1||curSlot>=1){draw(T1,h1,380,980,PREC.map(p=>({mz:p.mz,I:p.I})),'rgba(255,180,84,.85)','MS1 · m/z');
+      const S=curSlot;if(S>=0&&!isMS1(S)){const x=L+(winLo(winOf(S))-380)/600*w;cx.fillStyle='rgba(92,200,255,.35)';cx.fillRect(x-1,T1,Math.max(3,WW/600*w),h1);cx.fillStyle='#5cc8ff';cx.fillText('quad now',Math.min(x+4,L+w-50),T1+10);}}
+    if(lastMS2){const pk=[];for(const p of BYWIN[lastMS2.w])for(const f of p.frags)pk.push({mz:f.mz,I:p.I*f.I});
+      draw(T2,h1,100,1400,pk,null,'MS2 · m/z');cx.fillStyle='#dbe7f3';cx.fillText(`${BYWIN[lastMS2.w].length} precursors co-fragmented in this 2-Th window`,L+4,T2+10);}
+  }}
+
+/* ============ info ============ */
+const INFO={
+ esi:['Electrospray ionization','<p>Same front end as the Orbitrap Exploris family. Charged droplets (white) shrink into peptide ions.</p>'],
+ tube:['Ion transfer tube','<p>A heated tube that carries ions from atmosphere into the first vacuum stage.</p>'],
+ funnel:['Ion funnel','<p>RF rings that collect the expanding gas jet and focus it into a tight ion beam.</p>'],
+ guide:['Bent beam guide','<p>An RF guide with a bend. Ions follow it; neutrals and droplets (grey) fly straight and are pumped away.</p>'],
+ quad:['Quadrupole','<p>For MS1 it is open. For DIA MS2 it isolates very narrow windows. Narrow-window DIA (nDIA) used 2-Th windows. Everything outside the window crashes into the rods (red), which is why the rest of the instrument has to waste almost nothing.</p><p>Here the quad steps through windows spread across m/z 380–980. The real method runs about 300 consecutive windows.</p>'],
+ ctrap:['Bent trap (C-trap)','<p>Collects the MS1 packet, squeezes it into a short bunch and fires it into the Orbitrap, just as on an Exploris.</p>'],
+ orbi:['Ultra-high-field Orbitrap (MS1)','<p>Note how small it is next to the Astral analyzer, just a few centimetres (size estimated). Measures the MS1 scan at high resolution (typically 240,000) and high dynamic range. A long transient takes time, so the Orbitrap keeps oscillating its one MS1 packet <b>while</b> the Astral measures many MS2 scans. In this animation that is 8. On the real instrument, Thermo describes about 100 Astral MS2 scans during one 240k MS1 scan.</p>'],
+ irm:['Ion routing multipole (IRM)','<p>A gas-filled quadrupole ion guide (about 10⁻² mbar N₂) that traps and routes ions. It can also do HCD for Orbitrap MS2, but here it is the switching point: MS1 packets go back through the C-trap into the Orbitrap, and MS2 packets go forward toward the Astral side.</p>'],
+ oct:['Transfer octapole','<p>A 350 mm-long octapole that carries MS2 packets from the IRM to the ion processor. It is one of the longest parts of the ion path, which is why the line in Thermo’s rendering looks so long.</p>'],
+ ip:['Ion processor','<p>A small linear quadrupole trap (inscribed radius r₀ = 2 mm) with two pressure regions. In the <b>high-pressure</b> section (about 10⁻² mbar), ions are fragmented by HCD and cooled. In the <b>low-pressure</b> section (2–4 × 10⁻³ mbar), the packet is compressed and pulsed out into the Astral analyzer.</p><p>The quad fills the next packet while this one fragments and the previous one is in flight. That pipelining is how the instrument reaches up to 200 MS2 scans per second.</p>'],
+ inj:['Injection optics','<p>“Letterbox” lenses and an electrostatic prism shape the packet and launch it between the mirrors. The ions start at a shallow angle of about 2° to the reflection axis, so each pass only moves them a little way down the mirrors.</p>'],
+ mirrors:['Asymmetric ion mirrors (Astral analyzer)','<p>Two long, gridless ion mirrors made of 5 electrodes each. Ions fly through the slit between the upper and lower plates. The effective distance between the mirrors is about <b>640 mm</b>, so every pass across the gap is long.</p><p>The mirrors converge by only about <b>0.3 mm</b> along their length (drawn 20× larger here). That tiny asymmetry slows the ions’ drift, stops it about <b>335 mm</b> from the injection point, and sends the ions back. In total ions make about <b>24 oscillations</b>, a track of roughly 30 m, and reach the detector after about 0.8 ms for m/z 524. That gives up to about 80,000 resolution at m/z 524.</p><p>Slow the animation down (speed 0.1–0.3) to follow individual ions. The red line is one ion’s full track.</p>'],
+ foil:['Ion foil','<p>A pair of shaped plates mounted <b>above and below</b> the ion path between the mirrors, biased at a small adjustable voltage (0 to −20 V). Converging mirrors would otherwise make each oscillation slightly shorter the further ions drift, which smears arrival times. The foil corrects this: ions spend a different fraction of each pass at the foil potential depending on how far they have drifted. That keeps the oscillation period constant and also focuses the packet back onto the detector.</p><p>The outline here is traced from the plan-view schematic in Stewart et al. (2023). A central “bell” starts at the injection prism and widens with drift distance. Two outer wedges near the mirrors taper the opposite way and are not mirror images of each other. The proportions are read off the schematic, so they are approximate rather than engineering dimensions.</p>'],
+ det:['High dynamic range detector','<p>At the injection end of the mirrors, beside the beam axis on the tilted-mirror side (where the schematic puts it). Returning ions are post-accelerated (about 10 kV) onto a conversion dynode. Its output goes to a scintillator and photomultiplier with two gain channels, which lets the detector see single ions and still handle intense peaks.</p>']};
+const info=document.getElementById('info');
+function showInfo(k){document.getElementById('infoT').textContent=INFO[k][0];document.getElementById('infoB').innerHTML=INFO[k][1];info.hidden=false;}
+document.getElementById('infoX').onclick=()=>info.hidden=true;
+const ray=new THREE.Raycaster(),ndc=new THREE.Vector2();let down=null;
+renderer.domElement.addEventListener('pointerdown',e=>down={x:e.clientX,y:e.clientY});
+renderer.domElement.addEventListener('pointerup',e=>{if(!down||Math.hypot(e.clientX-down.x,e.clientY-down.y)>6)return;const r=renderer.domElement.getBoundingClientRect();
+  ndc.set((e.clientX-r.left)/r.width*2-1,-(e.clientY-r.top)/r.height*2+1);ray.setFromCamera(ndc,camera);const h=ray.intersectObjects(pickables,false)[0];if(h)showInfo(h.object.userData.key);});
+
+/* ============ camera ============ */
+let camAnim=null;
+function view(v){const a=camera.aspect,k=1/Math.min(a,1.3);let tgt,pos;
+  if(v==="overview"){tgt=a<1?new THREE.Vector3(12,0,4):new THREE.Vector3(7,-1,0);pos=a<1?tgt.clone().add(new THREE.Vector3(-.8,.62,.55).normalize().multiplyScalar(66/Math.max(a,.5))):tgt.clone().add(new THREE.Vector3(-.3,.6,1).normalize().multiplyScalar(Math.max(55,80/Math.min(a,1.7))));}
+  else if(v==='front'){tgt=new THREE.Vector3(-27,0,1);pos=new THREE.Vector3(-28,4,11*k);}
+  else if(v==='ctrap'){tgt=new THREE.Vector3(CTX+.5,-1.2,0);pos=new THREE.Vector3(CTX+2.5,1.5,6*k);}
+  else if(v==='ip'){tgt=new THREE.Vector3(19.5,0,0);pos=new THREE.Vector3(18,2.5,6*k);}
+  else{tgt=new THREE.Vector3(A.x0+8,0,0);pos=a<1?new THREE.Vector3(A.x0-14,30,30*k*.8):new THREE.Vector3(A.x0+8,40,22);}
+  camAnim={p0:camera.position.clone(),t0:controls.target.clone(),p1:pos,t1:tgt,s:performance.now()};}
+document.querySelectorAll('#views button').forEach(b=>b.onclick=()=>view(b.dataset.v));
+document.getElementById('speed').oninput=e=>speed=+e.target.value;
+const pb=document.getElementById('pause');pb.onclick=()=>{paused=!paused;pb.textContent=paused?'Play':'Pause';};
+function resize(){const w=stage.clientWidth,h=stage.clientHeight;renderer.setSize(w,h);labelR.setSize(w,h);camera.aspect=w/h;camera.updateProjectionMatrix();}
+new ResizeObserver(resize).observe(stage);resize();
+view('overview');camera.position.copy(camAnim.p1);controls.target.copy(camAnim.t1);camAnim=null;
+
+/* ============ loop ============ */
+for(let i=0;i<300;i++){simT+=1/60;update(1/60);}
+let last=performance.now();
+function loop(now){requestAnimationFrame(loop);const dt=Math.max(0,Math.min(.05,(now-last)/1000));last=now;
+  if(camAnim){let k=Math.min(1,(now-camAnim.s)/900);k=k<.5?2*k*k:1-Math.pow(-2*k+2,2)/2;camera.position.lerpVectors(camAnim.p0,camAnim.p1,k);controls.target.lerpVectors(camAnim.t0,camAnim.t1,k);if(k>=1)camAnim=null;}
+  if(!paused){simT+=dt*speed;update(dt*speed);}
+  writeInstances();updateStatus();drawPanel();controls.update();renderer.render(scene,camera);labelR.render(scene,camera);}
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
