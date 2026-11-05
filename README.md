@@ -5,7 +5,7 @@ Interactive 3D models of mass spectrometers, built to learn how ions move throug
 | Page | Instrument | What it shows |
 |---|---|---|
 | [`orbitrap.html`](orbitrap.html) | Q-Orbitrap (Q Exactive / Exploris layout) | ESI → S-lens → bent flatapole → quadrupole → C-trap → HCD → Orbitrap. Quadrupole trajectories integrated live from the Mathieu equation, stability diagram, Orbitrap transient → spectrum, TMT 127N/127C resolution demo |
-| [`timstof.html`](timstof.html) | timsTOF | Dual TIMS (parallel accumulation), mobility elution, diaPASEF window scheme (8 scans × 3 windows), mobility-synchronized quad and collision energy, orthogonal TOF with reflectron, m/z × 1/K₀ detector frame |
+| [`timstof.html`](timstof.html) | timsTOF | Dual TIMS (parallel accumulation), mobility elution, diaPASEF window scheme (8 scans × 3 windows of 25 Th, m/z 400–1000), mobility-synchronized quad and collision energy, orthogonal TOF with reflectron, m/z × 1/K₀ detector frame |
 | [`orbitrap-astral.html`](orbitrap-astral.html) | Orbitrap Astral | Parallel Orbitrap MS1 + narrow-window DIA MS2, ion processor, Astral analyzer at approximate real scale (640 mm effective mirror gap, ~335 mm drift, 24 oscillations), ion foil traced from Stewart et al. 2023, parallel-acquisition timeline |
 
 ## View
